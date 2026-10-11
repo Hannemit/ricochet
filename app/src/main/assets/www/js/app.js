@@ -357,10 +357,12 @@
     return playable() && !S.solved && !bidLocked();
   }
 
-  // In a bidding round the robots stay put until a bid is made. Seeing the
-  // solution or running out of time ends the bidding and frees the board.
-  const bidLocked = () => S.bidding && S.bid === null && !S.revealed && !S.timedOut;
-  const proving = () => S.bidding && S.bid !== null && !S.solved && !S.revealed && !S.timedOut;
+  // In a bidding round the robots stay put until a bid is made. Asking for a
+  // hint, seeing the solution or running out of time ends the bidding and
+  // frees the board.
+  const bidOpen = () => S.bidding && !S.revealed && !S.timedOut && !S.hintUsed;
+  const bidLocked = () => bidOpen() && S.bid === null;
+  const proving = () => bidOpen() && S.bid !== null && !S.solved;
 
   function placeBid() {
     if (!playable() || !bidLocked()) return;
@@ -468,6 +470,7 @@
     if (U.hint.depth > 0) {
       U.hintLevel = Math.min(3, U.hintLevel + 1);
       S.hintUsed = true;
+      S.bid = null;
       if (U.hint.fromStart) S.bestShown = true;
       if (U.hintLevel === 3) {
         const m = U.hint.moves[0];
@@ -806,7 +809,7 @@
       U.draft = Math.max(1, Math.min(30, U.draft));
       const lead = U.panel === 'bidfail'
         ? '<p><b>Bid failed.</b> You ran out of moves, so the robots are back at the start. Bid again.</p>'
-        : '<p>Find a route in your head, then bid how many moves it takes. The robots stay locked until you bid.</p>';
+        : '<p>Find a route in your head, then bid how many moves it takes. The robots stay locked until you bid, ask for a hint or run out of time.</p>';
       return (hint || `<div class="card">${lead}</div>`) +
         '<div class="row bidrow"><div class="stepper"><button data-act="bid-minus" aria-label="Fewer">−</button>' +
         `<b>${U.draft}</b><button data-act="bid-plus" aria-label="More">+</button></div>` +
