@@ -14,7 +14,7 @@ function bruteForce(walls, robots, target, active, maxDepth) {
   for (let depth = 1; depth <= maxDepth; depth++) {
     const next = [];
     for (const s of frontier) {
-      for (let r = 0; r < 4; r++) {
+      for (let r = 0; r < s.length; r++) {
         for (let d = 0; d < 4; d++) {
           const to = RR.slide(walls, s, r, d);
           if (to === s[r]) continue;
@@ -55,7 +55,8 @@ for (let seed = 1; seed <= 40; seed++) {
 
   const rng = RR.mulberry32(seed * 101);
   for (let i = 0; i < 6; i++) {
-    const robots = RR.randomRobots(rng, board);
+    // Alternate between four robots and five (with the silver one).
+    const robots = RR.randomRobots(rng, board, 4 + ((seed + i) & 1));
     const t = board.targets[RR.randInt(rng, 0, 16)];
     const cell = t.y * 16 + t.x;
     const active = t.color === RR.WILD ? -1 : t.color;
@@ -73,11 +74,16 @@ for (let seed = 1; seed <= 40; seed++) {
       assert.ok(RR.isSolved(end, t), 'solution does not reach the target');
     }
     // Optimality, checked against brute force where that is affordable.
-    if (res.depth >= 0 && res.depth <= 5) {
-      assert.strictEqual(bruteForce(board.walls, robots, cell, active, 5), res.depth);
+    if (res.depth >= 0 && res.depth <= 4) {
+      assert.strictEqual(bruteForce(board.walls, robots, cell, active, 4), res.depth);
     } else {
       assert.strictEqual(bruteForce(board.walls, robots, cell, active, 4), -1);
     }
+    // A node budget must give the same answer every time (the daily puzzle relies on it).
+    const a = RR.solve(board.walls, robots, cell, active, { maxDepth: 7, maxSolutions: 50, maxNodes: 200000 });
+    const b = RR.solve(board.walls, robots, cell, active, { maxDepth: 7, maxSolutions: 50, maxNodes: 200000 });
+    assert.deepStrictEqual(a, b);
+    if (a.depth >= 0) assert.strictEqual(a.depth, res.depth);
     const distinct = RR.distinctSolutions(res.solutions, 5);
     assert.ok(res.depth < 0 || distinct.length >= 1);
   }

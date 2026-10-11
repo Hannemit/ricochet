@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="color-scheme" content="light dark">
+<!-- Everything is bundled; the only outside connections are the multiplayer relays. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss://broker.hivemq.com:8884">
 <title>Ricochet</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -23,11 +25,12 @@
   <section class="goal" id="goal">
     <canvas id="goalIcon" width="96" height="96"></canvas>
     <div class="goal-text">
-      <div class="label">Target</div>
+      <div class="label">Target<span id="timeText"></span></div>
       <div class="goal-main" id="goalText"></div>
     </div>
     <div class="counter"><div class="num" id="moveCount">0</div><div class="label">moves</div></div>
-    <div class="counter"><div class="num" id="bestCount">?</div><div class="label">best</div></div>
+    <div class="counter"><div class="num" id="bestCount">?</div><div class="label" id="bestLabel">best</div></div>
+    <div class="timebar"><i id="timeBar"></i></div>
   </section>
 
   <div class="board-wrap" id="boardWrap"><canvas id="board"></canvas></div>
@@ -65,6 +68,9 @@
 <script src="js/board.js"></script>
 <script src="js/solver.js"></script>
 <script src="js/render.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/net.js"></script>
+<script src="js/versus.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

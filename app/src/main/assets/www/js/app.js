@@ -1,25 +1,35 @@
-// Game flow and UI. A game is one board played through all of its targets;
-// robots stay where the previous round left them, as in the tabletop game.
+// Solo game flow (practice and daily) and the shared UI. A practice game is
+// one board played through all of its targets, with robots staying where the
+// previous round left them, as in the tabletop game. Multiplayer lives in
+// versus.js and plugs into the same screen.
 (function () {
   'use strict';
 
   const RR = self.RR;
-  const NAMES = ['Red', 'Green', 'Blue', 'Yellow'];
+  const NAMES = ['Red', 'Green', 'Blue', 'Yellow', 'Silver'];
   const SHAPES = ['circle', 'triangle', 'square', 'star'];
   const DIR_WORDS = ['up', 'right', 'down', 'left'];
-  const STORE = 'ricochet.game.v1';
-  const STATS = 'ricochet.stats.v1';
+  const KEYS = {
+    practice: 'ricochet.game.v2',
+    daily: 'ricochet.daily.v1',
+    stats: 'ricochet.stats.v1',
+    settings: 'ricochet.settings.v1',
+  };
   // Preferred length of the best solution for each difficulty.
   const DIFFICULTY = {
     easy: { label: 'Easy', lo: 2, hi: 4 },
     medium: { label: 'Medium', lo: 4, hi: 7 },
     hard: { label: 'Hard', lo: 7, hi: 11 },
   };
+  // The daily puzzle is five targets that get steadily harder.
+  const DAILY_RANGES = [[2, 4], [3, 5], [4, 6], [5, 7], [6, 8]];
+  const TIMER_PRESETS = [0, 30, 60, 120];
 
   const $ = (id) => document.getElementById(id);
   const renderer = new RR.Renderer($('board'));
+  const versus = () => RR.versus;
 
-  let S = null; // saved game state
+  let S = null; // current solo game (practice or daily)
   const U = {   // transient view state
     selected: -1,
     panel: 'play',
@@ -29,7 +39,7 @@
     thinking: false,
     dealing: false,
     playback: null,
-    token: 0,   // bumps when a new round is dealt
+    token: 0,   // bumps when a new round is dealt or the game changes
     stamp: 0,   // bumps on every change to the robots
   };
 
@@ -48,7 +58,39 @@
     try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage unavailable */ }
   }
 
-  const save = () => store(STORE, S);
+  const settings = Object.assign({
+    difficulty: 'medium',
+    timer: 60,       // seconds per target; 0 turns the timer off
+    silver: true,
+    sound: true,
+    name: '',
+    pid: Math.random().toString(36).slice(2, 10),
+  }, load(KEYS.settings, {}));
+  if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'medium';
+  const saveSettings = () => { store(KEYS.settings, settings); RR.sound.enabled = settings.sound; };
+  saveSettings();
+
+  function save() {
+    // A daily puzzle that is still being generated is not worth keeping.
+    if (S && !(S.mode === 'daily' && !S.plan.length)) store(KEYS[S.mode], S);
+  }
+
+  function loadStats() {
+    return Object.assign({ games: 0, rounds: 0, stars: 0, perfect: 0, streak: 0, bestStreak: 0, lastDaily: '' },
+      load(KEYS.stats, {}));
+  }
+
+  function dateKey(offsetDays) {
+    const d = new Date();
+    d.setDate(d.getDate() + (offsetDays || 0));
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  // The streak only counts while yesterday's or today's daily is done.
+  function currentStreak(stats) {
+    return stats.lastDaily === dateKey(0) || stats.lastDaily === dateKey(-1) ? stats.streak : 0;
+  }
 
   /* ---------- solver client ---------- */
 
@@ -76,11 +118,11 @@
     worker = null;
   }
 
-  function solveAsync(robots, targetIndex, opts) {
-    const t = S.targets[targetIndex];
+  function solveAsync(board, robots, targetIndex, opts) {
+    const t = board.targets[targetIndex];
     const q = {
       id: ++requestId,
-      walls: S.walls,
+      walls: board.walls,
       robots: robots.slice(),
       target: t.y * RR.SIZE + t.x,
       active: t.color === RR.WILD ? -1 : t.color,
@@ -97,35 +139,145 @@
     });
   }
 
-  /* ---------- game flow ---------- */
+  const packOpt = (res) => ({ depth: res.depth, solutions: RR.distinctSolutions(res.solutions, 5) });
 
-  function newGame(difficulty) {
+  // Chooses the next target from `queue`: the first whose best solution fits
+  // the difficulty, otherwise whichever comes closest. Resolves to
+  // { ti, opt } (opt is null if no solution was found in time), to null if
+  // every remaining target already has its robot on it, or to undefined if
+  // `stale()` turned true while searching.
+  async function pickTarget(board, robots, queue, difficulty, stale) {
+    const { lo, hi } = DIFFICULTY[difficulty] || DIFFICULTY.medium;
+    let pick = null;
+    let shallow = null;
+    const beyond = [];
+    for (const ti of queue) {
+      const res = await solveAsync(board, robots, ti, { maxDepth: hi, maxSolutions: 200, timeMs: 2500 });
+      if (stale()) return undefined;
+      if (res.depth >= lo) { pick = { ti, res }; break; }
+      if (res.depth >= 1) {
+        if (!shallow || res.depth > shallow.res.depth) shallow = { ti, res };
+      } else if (res.depth < 0) {
+        beyond.push(ti);
+      }
+    }
+    if (!pick) {
+      let deep = null;
+      for (const ti of beyond.slice(0, 3)) {
+        const res = await solveAsync(board, robots, ti, { maxDepth: 18, maxSolutions: 200, timeMs: 6000 });
+        if (stale()) return undefined;
+        if (res.depth > 0 && (!deep || res.depth < deep.res.depth)) deep = { ti, res };
+        if (deep && deep.res.depth <= hi + 2) break;
+      }
+      if (deep && shallow) pick = deep.res.depth - hi <= lo - shallow.res.depth ? deep : shallow;
+      else pick = deep || shallow;
+      if (!pick && beyond.length) return { ti: beyond[0], opt: null };
+    }
+    return pick ? { ti: pick.ti, opt: packOpt(pick.res) } : null;
+  }
+
+  /* ---------- solo game flow ---------- */
+
+  // The game shown on screen: the multiplayer view while one is running,
+  // otherwise the solo game. Both use the same field names.
+  const G = () => (versus().active() ? versus().view() : S);
+
+  function blankRound() {
+    return {
+      target: -1, start: null, moves: [], solved: false, best: null, bestEnd: null,
+      revealed: false, timedOut: false, hintMove: false, bestShown: false, opt: null, timeLeft: null,
+    };
+  }
+
+  function newPractice() {
     const seed = (Date.now() ^ Math.floor(Math.random() * 4294967296)) >>> 0;
     const board = RR.generateBoard(seed);
     const rng = RR.mulberry32(seed ^ 0x5bd1e995);
-    S = {
-      v: 1,
+    S = Object.assign({
+      v: 2,
+      mode: 'practice',
       seed,
-      difficulty,
       walls: board.walls,
       targets: board.targets,
-      robots: RR.randomRobots(rng, board),
+      robots: RR.randomRobots(rng, board, settings.silver ? 5 : 4),
       queue: RR.shuffle(rng, board.targets.map((_, i) => i)),
       results: [],
-      target: -1,
-      start: null,
-      moves: [],
-      solved: false,
-      best: null,
-      bestEnd: null,
-      revealed: false,
-      hintMove: false,
-      bestShown: false,
-      opt: null,
       done: false,
-    };
+    }, blankRound());
     renderer.setBoard(S);
     deal();
+  }
+
+  function hashText(text) {
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+    return h >>> 0;
+  }
+
+  // Builds today's puzzle. Everything is derived from the date and the solver
+  // is limited by node count rather than time, so every phone gets the same
+  // five targets.
+  async function startDaily() {
+    const date = dateKey(0);
+    const saved = load(KEYS.daily, null);
+    if (saved && saved.v === 2 && saved.date === date && saved.plan.length === DAILY_RANGES.length) {
+      adopt(saved);
+      if (S.done) openSummary();
+      return;
+    }
+    const token = ++U.token;
+    const seed = hashText('ricochet-daily-' + date);
+    const board = RR.generateBoard(seed);
+    const rng = RR.mulberry32(seed ^ 0x2545f491);
+    S = Object.assign({
+      v: 2, mode: 'daily', date, seed,
+      walls: board.walls, targets: board.targets,
+      robots: RR.randomRobots(rng, board, 5),
+      queue: [], plan: [], results: [], done: false,
+    }, blankRound());
+    resetRoundView();
+    U.dealing = true;
+    U.selected = -1;
+    renderer.setBoard(S);
+    render();
+
+    const pool = RR.shuffle(rng, board.targets.map((_, i) => i));
+    const used = new Set();
+    const plan = [];
+    let at = 0;
+    for (const [lo, hi] of DAILY_RANGES) {
+      for (let tries = 0; ; tries++) {
+        const robots = RR.randomRobots(rng, board, 5);
+        const ti = pool[at++ % pool.length];
+        if (used.has(ti)) continue;
+        const res = await solveAsync(board, robots, ti, { maxDepth: hi, maxSolutions: 200, maxNodes: 300000 });
+        if (token !== U.token) return;
+        // After many misses, accept anything that is at least two moves.
+        if (res.depth >= (tries < 80 ? lo : 2)) {
+          used.add(ti);
+          plan.push({ robots, ti, opt: packOpt(res) });
+          break;
+        }
+      }
+    }
+    S.plan = plan;
+    deal();
+  }
+
+  function adopt(game) {
+    U.token++;
+    resetRoundView();
+    U.dealing = false;
+    S = game;
+    renderer.setBoard(S);
+    if (!S.done && S.target < 0) { deal(); return; }
+    U.panel = S.done ? 'play' : S.solved ? 'solved' : S.timedOut ? 'timeup' : 'play';
+    U.selected = -1;
+    if (!S.done) {
+      const color = S.targets[S.target].color;
+      U.selected = color === RR.WILD ? -1 : color;
+    }
+    render();
   }
 
   function resetRoundView() {
@@ -138,63 +290,42 @@
     U.stamp++;
   }
 
-  // Chooses the next target: the first one in the queue whose best solution
-  // fits the difficulty, otherwise whichever comes closest.
+  function totalRounds() {
+    if (S.mode === 'daily') return DAILY_RANGES.length;
+    return S.results.length + S.queue.length + (S.target >= 0 ? 1 : 0);
+  }
+
   async function deal() {
     const token = ++U.token;
+    const game = S;
     resetRoundView();
     U.dealing = true;
     U.selected = -1;
-    S.target = -1;
+    Object.assign(S, blankRound());
     save();
     render();
 
-    const { lo, hi } = DIFFICULTY[S.difficulty] || DIFFICULTY.medium;
-    let pick = null;
-    let shallow = null;
-    const beyond = [];
-    for (const ti of S.queue) {
-      const res = await solveAsync(S.robots, ti, { maxDepth: hi, maxSolutions: 200, timeMs: 2500 });
-      if (token !== U.token) return;
-      if (res.depth >= lo) { pick = { ti, res }; break; }
-      if (res.depth >= 1) {
-        if (!shallow || res.depth > shallow.res.depth) shallow = { ti, res };
-      } else if (res.depth < 0) {
-        beyond.push(ti);
+    let pick;
+    if (S.mode === 'daily') {
+      const p = S.plan[S.results.length];
+      S.robots = p.robots.slice();
+      pick = { ti: p.ti, opt: p.opt };
+    } else {
+      pick = await pickTarget(S, S.robots, S.queue, settings.difficulty, () => token !== U.token || game !== S);
+      if (pick === undefined) return;
+      if (pick === null) {
+        // Only targets that already have their robot parked on them are left.
+        S.queue = [];
+        finishGame();
+        return;
       }
-    }
-    if (!pick) {
-      let deep = null;
-      for (const ti of beyond.slice(0, 3)) {
-        const res = await solveAsync(S.robots, ti, { maxDepth: 18, maxSolutions: 200, timeMs: 6000 });
-        if (token !== U.token) return;
-        if (res.depth > 0 && (!deep || res.depth < deep.res.depth)) deep = { ti, res };
-        if (deep && deep.res.depth <= hi + 2) break;
-      }
-      if (deep && shallow) pick = deep.res.depth - hi <= lo - shallow.res.depth ? deep : shallow;
-      else pick = deep || shallow;
-      if (!pick && beyond.length) pick = { ti: beyond[0], res: null };
-    }
-    if (!pick) {
-      // Only targets that already have their robot parked on them are left.
-      S.queue = [];
-      finishGame();
-      return;
+      S.queue.splice(S.queue.indexOf(pick.ti), 1);
     }
 
-    S.queue.splice(S.queue.indexOf(pick.ti), 1);
     S.target = pick.ti;
     S.start = S.robots.slice();
-    S.moves = [];
-    S.solved = false;
-    S.best = null;
-    S.bestEnd = null;
-    S.revealed = false;
-    S.hintMove = false;
-    S.bestShown = false;
-    S.opt = pick.res
-      ? { depth: pick.res.depth, solutions: RR.distinctSolutions(pick.res.solutions, 5) }
-      : null;
+    S.opt = pick.opt;
+    S.timeLeft = settings.timer > 0 ? settings.timer * 1000 : null;
     U.dealing = false;
     const color = S.targets[S.target].color;
     U.selected = color === RR.WILD ? -1 : color;
@@ -203,7 +334,13 @@
   }
 
   function playable() {
-    return S && !S.done && !U.dealing && !U.playback && S.target >= 0;
+    return S && !versus().active() && !S.done && !U.dealing && !U.playback && S.target >= 0;
+  }
+
+  // Whether the player may move robots right now.
+  function canMove() {
+    if (versus().active()) return !U.playback && versus().canMove();
+    return playable() && !S.solved;
   }
 
   function clearHint() {
@@ -212,8 +349,11 @@
     if (U.hintLevel > 2) U.hintLevel = 2;
   }
 
+  const roundClosed = () => S.best !== null || S.revealed || S.timedOut;
+
   function move(r, d) {
-    if (!playable() || S.solved) return;
+    if (!canMove()) return;
+    if (versus().active()) { versus().move(r, d); return; }
     const from = S.robots[r];
     const to = RR.slide(S.walls, S.robots, r, d);
     U.selected = r;
@@ -231,6 +371,7 @@
         S.bestEnd = S.robots.slice();
       }
       U.panel = 'solved';
+      RR.sound.solved(!!S.opt && S.moves.length <= S.opt.depth);
     }
     save();
     render();
@@ -252,7 +393,7 @@
   }
 
   function resetRound() {
-    if (!S || S.done || U.dealing || S.target < 0) return;
+    if (versus().active() || !S || S.done || U.dealing || S.target < 0) return;
     stopPlayback();
     S.robots = S.start.slice();
     S.moves = [];
@@ -274,7 +415,7 @@
         const stamp = U.stamp;
         U.thinking = true;
         render();
-        const res = await solveAsync(S.robots, S.target, { maxDepth: 16, timeMs: 5000 });
+        const res = await solveAsync(S, S.robots, S.target, { maxDepth: 16, timeMs: 5000 });
         U.thinking = false;
         if (stamp !== U.stamp) { render(); return; }
         U.hint = res.depth > 0
@@ -297,23 +438,28 @@
   }
 
   function showSolutions(confirmed) {
-    if (!S || S.done || U.dealing || S.target < 0) return;
-    if (!S.opt) return;
-    if (S.best === null && !S.revealed && !confirmed) {
-      U.panel = 'confirm-reveal';
-      render();
-      return;
+    const g = G();
+    if (!g || !g.opt || g.target < 0 || U.dealing) return;
+    if (versus().active()) {
+      if (!versus().canSeeSolutions()) return;
+    } else {
+      if (S.done) return;
+      if (!roundClosed() && !confirmed) {
+        U.panel = 'confirm-reveal';
+        render();
+        return;
+      }
+      if (S.best === null) S.revealed = true;
+      S.bestShown = true;
+      clearHint();
+      save();
     }
-    if (S.best === null) S.revealed = true;
-    S.bestShown = true;
-    clearHint();
     U.panel = 'solutions';
-    save();
     startPlayback(0);
   }
 
   function starsFor() {
-    if (S.best === null || S.revealed) return 0;
+    if (S.best === null || S.revealed || S.timedOut) return 0;
     const opt = S.opt ? S.opt.depth : S.best;
     let stars = S.best <= opt ? 3 : S.best <= opt + 2 ? 2 : 1;
     if (S.hintMove) stars = Math.min(stars, 2);
@@ -321,8 +467,9 @@
   }
 
   function next(confirmed) {
+    if (versus().active()) { stopPlayback(); versus().next(); return; }
     if (!S || S.done || U.dealing || S.target < 0) return;
-    if (S.best === null && !S.revealed && !confirmed) {
+    if (!roundClosed() && !confirmed) {
       U.panel = 'confirm-skip';
       render();
       return;
@@ -331,15 +478,15 @@
     const stars = starsFor();
     S.results.push({
       target: S.target,
-      moves: S.revealed ? null : S.best,
+      moves: S.revealed || S.timedOut ? null : S.best,
       optimal: S.opt ? S.opt.depth : null,
       stars,
     });
-    const stats = load(STATS, { games: 0, rounds: 0, stars: 0, perfect: 0 });
+    const stats = loadStats();
     stats.rounds++;
     stats.stars += stars;
     if (stars === 3) stats.perfect++;
-    store(STATS, stats);
+    store(KEYS.stats, stats);
 
     // The next round starts from the player's best finish, or from the best
     // solution if they did not find one.
@@ -347,34 +494,101 @@
     else if (S.opt) S.robots = RR.replay(S.walls, S.start, S.opt.solutions[0]).pop();
     else S.robots = S.start.slice();
 
-    if (S.queue.length) deal();
+    const more = S.mode === 'daily' ? S.results.length < S.plan.length : S.queue.length > 0;
+    if (more) deal();
     else finishGame();
   }
 
   function finishGame() {
+    U.token++;
     resetRoundView();
     U.dealing = false;
     U.selected = -1;
     S.done = true;
-    S.target = -1;
-    S.moves = [];
-    const stats = load(STATS, { games: 0, rounds: 0, stars: 0, perfect: 0 });
+    Object.assign(S, blankRound());
+    const stats = loadStats();
     stats.games++;
-    store(STATS, stats);
+    if (S.mode === 'daily' && stats.lastDaily !== S.date) {
+      stats.streak = stats.lastDaily === dateKey(-1) ? stats.streak + 1 : 1;
+      stats.bestStreak = Math.max(stats.bestStreak, stats.streak);
+      stats.lastDaily = S.date;
+    }
+    store(KEYS.stats, stats);
     save();
     render();
     openSummary();
+  }
+
+  /* ---------- timer ---------- */
+
+  let lastTick = performance.now();
+  let lastSecond = -1;
+
+  function soloTimerRunning() {
+    return S && !versus().active() && S.timeLeft !== null && !S.done && !U.dealing && S.target >= 0 &&
+      !roundClosed() && $('scrim').hidden && !document.hidden;
+  }
+
+  function tick() {
+    const now = performance.now();
+    const dt = Math.min(1000, now - lastTick);
+    lastTick = now;
+    if (versus().connected()) versus().tick();
+    if (soloTimerRunning()) {
+      S.timeLeft -= dt;
+      if (S.timeLeft <= 0) {
+        S.timeLeft = 0;
+        S.timedOut = true;
+        S.bestShown = true;
+        clearHint();
+        U.panel = 'timeup';
+        RR.sound.timeUp();
+        save();
+        render();
+      }
+    }
+    updateTimer();
+  }
+
+  function formatTime(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function updateTimer() {
+    let t = null; // { left, total } in ms
+    if (versus().active()) t = versus().timer();
+    else if (S && S.timeLeft !== null && !S.done && S.target >= 0 && !U.dealing) {
+      t = { left: S.timeLeft, total: settings.timer * 1000, frozen: roundClosed() };
+    }
+    const el = $('timeText');
+    const bar = $('timeBar');
+    if (!t) {
+      el.textContent = '';
+      bar.style.width = '0';
+      lastSecond = -1;
+      return;
+    }
+    const low = t.left <= 10000 && !t.frozen;
+    el.textContent = ' · ' + formatTime(t.left);
+    el.classList.toggle('low', low);
+    bar.classList.toggle('low', low);
+    bar.style.width = Math.max(0, Math.min(100, t.left / Math.max(1, t.total) * 100)) + '%';
+    const sec = Math.ceil(t.left / 1000);
+    if (sec !== lastSecond && sec <= 5 && sec > 0 && !t.frozen && lastSecond !== -1) RR.sound.tick();
+    lastSecond = sec;
   }
 
   /* ---------- solution playback ---------- */
 
   function startPlayback(index) {
     stopPlayback();
-    const moves = S.opt.solutions[index];
+    const g = G();
+    const moves = g.opt.solutions[index];
     U.playback = {
       index,
       moves,
-      states: RR.replay(S.walls, S.start, moves),
+      states: RR.replay(g.walls, g.start, moves),
       step: 0,
       timer: 0,
     };
@@ -418,14 +632,16 @@
 
   function closeSolutions() {
     stopPlayback();
-    U.panel = S.solved ? 'solved' : 'play';
+    U.panel = versus().active() ? 'play' : S.solved ? 'solved' : S.timedOut ? 'timeup' : 'play';
     render();
   }
 
   /* ---------- rendering ---------- */
 
+  const FLAME = '<svg class="flame" viewBox="0 0 24 24"><path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2 1-3.2 2-4.2.3 1.6 1 2.2 1.7 2.2C11 8 10.5 5 12 2z"/></svg>';
   const ARROW = (d) => `<svg class="d${d}" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;
   const chip = (m, cls) => `<span class="chip r${m.r} ${cls || ''}">${ARROW(m.d)}</span>`;
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   function starsHtml(n) {
     return '★'.repeat(n) + `<span class="off">${'★'.repeat(3 - n)}</span>`;
@@ -461,45 +677,59 @@
       const m = h.moves[0];
       lines.push(`<span class="inline-move">Next move: ${chip(m)} <b>${NAMES[m.r]} ${DIR_WORDS[m.d]}</b></span>`);
     }
-    const more = U.hintLevel < 3 ? '<p class="tip" style="text-align:left;padding:0">Tap Hint again for more.</p>' : '';
+    const more = U.hintLevel < 3 ? '<p class="muted">Tap Hint again for more.</p>' : '';
     return `<div class="card"><div class="label">Hint ${U.hintLevel} of 3</div>${lines.map((l) => `<p>${l}</p>`).join('')}${more}</div>`;
   }
 
-  function panelHtml() {
-    if (S.done) {
-      return '<p class="tip">Board complete.</p><div class="row"><button class="btn primary" data-act="summary">See results</button><button class="btn" data-act="new">New board</button></div>';
-    }
-    if (U.dealing) return '<p class="tip">Setting up the next target…</p>';
+  function solutionsHtml() {
+    const pb = U.playback;
+    const opt = G().opt;
+    const count = opt.solutions.length;
+    const rows = opt.solutions.map((moves, i) => {
+      const active = i === pb.index;
+      const chips = moves.map((m, k) => {
+        const cls = active ? (k < pb.step ? 'done' : '') + (k === pb.step - 1 ? ' now' : '') : '';
+        return `<span data-step="${k + 1}">${chip(m, cls)}</span>`;
+      }).join('');
+      return `<li class="sol ${active ? 'active' : ''}" data-sol="${i}"><span class="sol-n">${i + 1}</span><span class="chips">${chips}</span></li>`;
+    }).join('');
+    const playing = !!pb.timer;
+    return `<div class="sol-head"><b>${count === 1 ? 'Best solution' : `${count} best solutions`} · ${plural(opt.depth, 'move')}</b>` +
+      '<button class="link" data-act="close-solutions">Back to game</button></div>' +
+      `<ol class="sols">${rows}</ol>` +
+      '<div class="transport">' +
+      '<button data-act="pb-start" aria-label="Back to start"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14l-10-7z"/></svg></button>' +
+      '<button data-act="pb-prev" aria-label="Step back"><svg viewBox="0 0 24 24"><path d="M17 5v14L7 12z"/></svg></button>' +
+      `<button data-act="pb-play" aria-label="${playing ? 'Pause' : 'Play'}"><svg viewBox="0 0 24 24">${playing ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>'}</svg></button>` +
+      '<button data-act="pb-next" aria-label="Step forward"><svg viewBox="0 0 24 24"><path d="M7 5v14l10-7z"/></svg></button>' +
+      '</div>';
+  }
 
+  function panelHtml() {
+    if (U.panel === 'solutions' && U.playback) return solutionsHtml();
+    if (versus().active()) return versus().panelHtml();
+
+    if (S.done) {
+      return '<p class="tip">' + (S.mode === 'daily' ? 'Today’s puzzle is done. A new one arrives at midnight.' : 'Board complete.') + '</p>' +
+        '<div class="row"><button class="btn primary" data-act="summary">See results</button>' +
+        (S.mode === 'daily' ? '<button class="btn" data-act="practice">Practice</button>' : '<button class="btn" data-act="new-confirmed">New board</button>') + '</div>';
+    }
+    if (U.dealing) {
+      return `<p class="tip">${S.mode === 'daily' && !S.plan.length ? 'Preparing today’s puzzle…' : 'Setting up the next target…'}</p>`;
+    }
     if (U.panel === 'confirm-reveal') {
       return '<div class="card"><p><b>Show the best solution?</b></p><p>This round will score no stars.</p></div>' +
         '<div class="row"><button class="btn" data-act="cancel">Keep trying</button><button class="btn primary" data-act="reveal">Show it</button></div>';
     }
     if (U.panel === 'confirm-skip') {
-      return '<div class="card"><p><b>Skip this target?</b></p><p>The robots will move as in the best solution and the round scores no stars.</p></div>' +
+      return '<div class="card"><p><b>Skip this target?</b></p><p>The round scores no stars.</p></div>' +
         '<div class="row"><button class="btn" data-act="cancel">Keep trying</button><button class="btn primary" data-act="skip">Skip</button></div>';
     }
-    if (U.panel === 'solutions' && U.playback) {
-      const pb = U.playback;
-      const count = S.opt.solutions.length;
-      const rows = S.opt.solutions.map((moves, i) => {
-        const active = i === pb.index;
-        const chips = moves.map((m, k) => {
-          const cls = active ? (k < pb.step ? 'done' : '') + (k === pb.step - 1 ? ' now' : '') : '';
-          return `<span data-step="${k + 1}">${chip(m, cls)}</span>`;
-        }).join('');
-        return `<li class="sol ${active ? 'active' : ''}" data-sol="${i}"><span class="sol-n">${i + 1}</span><span class="chips">${chips}</span></li>`;
-      }).join('');
-      const playing = !!pb.timer;
-      return `<div class="sol-head"><b>${count === 1 ? 'Best solution' : `${count} best solutions`} · ${plural(S.opt.depth, 'move')}</b>` +
-        '<button class="link" data-act="close-solutions">Back to game</button></div>' +
-        `<ol class="sols">${rows}</ol>` +
-        '<div class="transport">' +
-        '<button data-act="pb-start" aria-label="Back to start"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14l-10-7z"/></svg></button>' +
-        '<button data-act="pb-prev" aria-label="Step back"><svg viewBox="0 0 24 24"><path d="M17 5v14L7 12z"/></svg></button>' +
-        `<button data-act="pb-play" aria-label="${playing ? 'Pause' : 'Play'}"><svg viewBox="0 0 24 24">${playing ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>'}</svg></button>` +
-        '<button data-act="pb-next" aria-label="Step forward"><svg viewBox="0 0 24 24"><path d="M7 5v14l10-7z"/></svg></button>' +
-        '</div>';
+    if (U.panel === 'timeup' && S.timedOut && !S.solved) {
+      return '<div class="card"><p><b>Time’s up</b></p><p>No stars for this target. You can keep trying, or look at the best solution.</p></div>' +
+        '<div class="row"><button class="btn" data-act="cancel">Keep trying</button>' +
+        (S.opt ? '<button class="btn" data-act="solutions">Best solutions</button>' : '') +
+        '<button class="btn primary" data-act="next">Next target</button></div>';
     }
     if (U.panel === 'solved' && S.solved) {
       const stars = starsFor();
@@ -508,7 +738,8 @@
       if (!S.opt) note = 'Nicely done.';
       else if (n <= S.opt.depth) note = 'That is the best possible.';
       else note = `The best possible is ${plural(S.opt.depth, 'move')}.`;
-      if (S.revealed) note += ' No stars after seeing the solution.';
+      if (S.timedOut) note += ' No stars after the timer ran out.';
+      else if (S.revealed) note += ' No stars after seeing the solution.';
       else if (S.hintMove && stars === 2 && n <= (S.opt ? S.opt.depth : n)) note += ' One star off for the move hint.';
       const canImprove = S.opt && n > S.opt.depth;
       return `<div class="card result"><div class="stars">${starsHtml(stars)}</div>` +
@@ -524,30 +755,41 @@
       return '<p class="tip">Tap a robot, then swipe to send it sliding. It only stops at a wall or another robot.</p>';
     }
     const trail = S.moves.slice(-12).map((m) => chip(m)).join('');
-    return `<div class="chips" style="justify-content:center">${trail}</div>`;
+    return `<div class="chips centered">${trail}</div>`;
   }
 
   function drawGoalIcon() {
     const c = $('goalIcon');
     const ctx = c.getContext('2d');
     ctx.clearRect(0, 0, c.width, c.height);
-    if (!S || S.target < 0) return;
-    const t = S.targets[S.target];
+    const g = G();
+    if (!g || g.target < 0) return;
+    const t = g.targets[g.target];
     RR.drawTarget(ctx, c.width / 2, c.height / 2, c.width * 0.36, t.color, t.shape, renderer.theme.robots);
   }
 
   function render() {
-    if (!S) return;
-    const total = S.results.length + S.queue.length + (S.target >= 0 ? 1 : 0);
-    const stars = S.results.reduce((a, r) => a + r.stars, 0);
-    $('round').innerHTML = S.done
-      ? `Finished · <b>★ ${stars}</b>`
-      : `Round <b>${Math.min(S.results.length + 1, total)}</b> of ${total} · <b>★ ${stars}</b>`;
+    const g = G();
+    if (!g) return;
+    const vs = versus().active();
+    if (renderer.board !== g) renderer.setBoard(g);
 
-    const hasTarget = S.target >= 0;
-    $('goalText').innerHTML = hasTarget ? targetWords(S.targets[S.target]) : (S.done ? 'Board complete' : '…');
-    $('moveCount').textContent = S.moves.length;
-    $('bestCount').textContent = hasTarget && S.opt && S.bestShown ? S.opt.depth : '?';
+    if (vs) {
+      $('round').innerHTML = versus().roundLabel();
+    } else {
+      const total = totalRounds();
+      const stars = S.results.reduce((a, r) => a + r.stars, 0);
+      const what = S.mode === 'daily' ? 'Daily' : 'Round';
+      $('round').innerHTML = S.done
+        ? `Finished · <b>★ ${stars}</b>`
+        : `${what} <b>${Math.min(S.results.length + 1, total)}</b> of ${total} · <b>★ ${stars}</b>`;
+    }
+
+    const hasTarget = g.target >= 0;
+    $('goalText').innerHTML = hasTarget ? targetWords(g.targets[g.target]) : (!vs && S.done ? 'All done' : '…');
+    $('moveCount').textContent = g.moves.length;
+    $('bestLabel').textContent = vs ? 'bid' : 'best';
+    $('bestCount').textContent = vs ? versus().bidText() : (hasTarget && S.opt && S.bestShown ? S.opt.depth : '?');
     drawGoalIcon();
 
     const pb = U.playback;
@@ -555,7 +797,7 @@
     if (pb) {
       scene = {
         robots: pb.states[pb.step],
-        target: S.target,
+        target: g.target,
         trails: pb.moves.slice(0, pb.step).map((m, i) => ({ r: m.r, from: pb.states[i][m.r], to: pb.states[i + 1][m.r] })),
         selected: -1,
         ghosts: [],
@@ -563,68 +805,141 @@
       };
     } else {
       const ghosts = [];
-      const canMove = playable() && !S.solved;
-      if (canMove && U.selected >= 0) {
+      const movable = canMove();
+      if (U.selected >= g.robots.length) U.selected = -1;
+      if (movable && U.selected >= 0) {
         for (let d = 0; d < 4; d++) {
-          const to = RR.slide(S.walls, S.robots, U.selected, d);
-          if (to !== S.robots[U.selected]) ghosts.push(to);
+          const to = RR.slide(g.walls, g.robots, U.selected, d);
+          if (to !== g.robots[U.selected]) ghosts.push(to);
         }
       }
       scene = {
-        robots: S.robots,
-        target: S.target,
-        trails: S.moves,
-        selected: canMove ? U.selected : -1,
+        robots: g.robots,
+        target: g.target,
+        trails: g.moves,
+        selected: movable ? U.selected : -1,
         ghosts,
-        hint: U.hintArrow,
+        hint: vs ? null : U.hintArrow,
       };
     }
     renderer.setScene(scene);
 
     $('panel').innerHTML = panelHtml();
 
-    const idle = !S.done && !U.dealing && hasTarget;
-    $('undoBtn').disabled = !idle || !!pb || !S.moves.length;
-    $('resetBtn').disabled = !idle || (!S.moves.length && !pb);
-    $('hintBtn').disabled = !idle || !!pb || S.solved;
-    $('solutionBtn').disabled = !idle || !S.opt;
-    $('nextBtn').disabled = !idle;
-    const finished = S.best !== null || S.revealed;
-    $('nextBtn').classList.toggle('primary', idle && finished);
-    $('nextLabel').textContent = finished ? 'Next' : 'Skip';
+    if (vs) {
+      const canNext = versus().canNext();
+      $('undoBtn').disabled = true;
+      $('resetBtn').disabled = true;
+      $('hintBtn').disabled = true;
+      $('solutionBtn').disabled = !versus().canSeeSolutions();
+      $('nextBtn').disabled = !canNext;
+      $('nextBtn').classList.toggle('primary', canNext);
+      $('nextLabel').textContent = 'Next';
+    } else {
+      const idle = !S.done && !U.dealing && hasTarget;
+      $('undoBtn').disabled = !idle || !!pb || !S.moves.length;
+      $('resetBtn').disabled = !idle || (!S.moves.length && !pb);
+      $('hintBtn').disabled = !idle || !!pb || S.solved;
+      $('solutionBtn').disabled = !idle || !S.opt;
+      $('nextBtn').disabled = !idle;
+      $('nextBtn').classList.toggle('primary', idle && roundClosed());
+      $('nextLabel').textContent = roundClosed() ? 'Next' : 'Skip';
+    }
+    updateTimer();
   }
 
   /* ---------- dialogs ---------- */
 
-  function openDialog(html) {
+  let dialogKind = '';
+
+  function openDialog(html, kind) {
+    dialogKind = kind || '';
     $('dialog').innerHTML = html;
     $('scrim').hidden = false;
   }
 
   function closeDialog() {
+    dialogKind = '';
     $('scrim').hidden = true;
+    lastTick = performance.now();
   }
 
-  function openMenu(confirmNew) {
-    const stats = load(STATS, { games: 0, rounds: 0, stars: 0, perfect: 0 });
-    const inProgress = S && !S.done && S.results.length > 0;
-    const seg = Object.keys(DIFFICULTY).map((k) =>
-      `<button role="radio" aria-checked="${S.difficulty === k}" data-diff="${k}">${DIFFICULTY[k].label}</button>`).join('');
-    const d = DIFFICULTY[S.difficulty];
+  function openHome() {
+    if (versus().connected()) { versus().openMenu(); return; }
+    const stats = loadStats();
+    const streak = currentStreak(stats);
+    const daily = load(KEYS.daily, null);
+    const today = daily && daily.date === dateKey(0) && daily.plan.length ? daily : null;
+    const practice = load(KEYS.practice, null);
+    const practiceLive = practice && practice.v === 2 && !practice.done;
+
+    let dailyNote;
+    if (today && today.done) {
+      const stars = today.results.reduce((a, r) => a + r.stars, 0);
+      dailyNote = `Done today · ★ ${stars} of ${DAILY_RANGES.length * 3}`;
+    } else if (today) {
+      dailyNote = `In progress · target ${today.results.length + 1} of ${DAILY_RANGES.length}`;
+    } else {
+      dailyNote = streak > 0 && stats.lastDaily !== dateKey(0)
+        ? `Five targets · play today to keep your streak`
+        : 'Five targets, the same for everyone today';
+    }
+    const practiceNote = practiceLive
+      ? `Continue · round ${practice.results.length + 1} of ${practice.results.length + practice.queue.length + (practice.target >= 0 ? 1 : 0)}`
+      : 'A fresh board, as many as you like';
+
     openDialog(
-      '<h2>Ricochet</h2>' +
-      `<div class="field"><div class="label">Difficulty</div><div class="seg" role="radiogroup">${seg}</div>` +
-      `<p class="muted">Targets whose best solution takes ${d.lo} to ${d.hi} moves. Applies from the next target.</p></div>` +
+      '<div class="home-head"><h2>Ricochet</h2>' +
+      `<div class="streak ${streak ? 'lit' : ''}" title="Daily streak">${FLAME}<b>${streak}</b> day${streak === 1 ? '' : 's'}</div></div>` +
       '<div class="stack">' +
-      (confirmNew && inProgress
-        ? '<button class="btn primary" data-act="new-confirmed">Discard this game and start</button>'
-        : '<button class="btn primary" data-act="new">New board</button>') +
-      '<button class="btn" data-act="help">How to play</button></div>' +
-      '<div class="field"><div class="label">Your record</div><div class="stats">' +
-      `<div><b>${stats.rounds}</b><span class="muted">rounds</span></div>` +
+      `<button class="tile" data-act="daily"><b>Daily puzzle</b><span>${dailyNote}</span></button>` +
+      `<button class="tile" data-act="practice"><b>Practice</b><span>${practiceNote}</span></button>` +
+      (practiceLive ? '<button class="tile slim" data-act="new"><b>New practice board</b></button>' : '') +
+      '<button class="tile" data-act="friend"><b>Play with a friend</b><span>Live bidding over the internet</span></button>' +
+      '</div>' +
+      '<div class="row"><button class="btn" data-act="settings">Settings</button><button class="btn" data-act="help">How to play</button></div>' +
+      '<div class="stats">' +
+      `<div><b>${stats.rounds}</b><span class="muted">targets</span></div>` +
       `<div><b>${stats.stars}</b><span class="muted">stars</span></div>` +
-      `<div><b>${stats.perfect}</b><span class="muted">perfect</span></div></div></div>` +
-      '<button class="btn quiet" data-act="close">Close</button>');
+      `<div><b>${stats.bestStreak}</b><span class="muted">best streak</span></div></div>` +
+      (S ? '<button class="btn quiet" data-act="close">Back to game</button>' : ''), 'home');
+  }
+
+  function seg(name, options, value) {
+    return `<div class="seg" role="radiogroup" style="grid-template-columns:repeat(${options.length},1fr)">` +
+      options.map((o) => `<button role="radio" aria-checked="${o[0] === value}" data-set="${name}" data-value="${o[0]}">${o[1]}</button>`).join('') +
+      '</div>';
+  }
+
+  function openSettings() {
+    const d = DIFFICULTY[settings.difficulty];
+    const custom = TIMER_PRESETS.indexOf(settings.timer) < 0;
+    const timerValue = custom ? 'custom' : String(settings.timer);
+    openDialog(
+      '<h2>Settings</h2>' +
+      '<div class="field"><div class="label">Difficulty</div>' +
+      seg('difficulty', Object.keys(DIFFICULTY).map((k) => [k, DIFFICULTY[k].label]), settings.difficulty) +
+      `<p class="muted">Practice targets whose best solution takes ${d.lo} to ${d.hi} moves. Applies from the next target.</p></div>` +
+      '<div class="field"><div class="label">Timer per target</div>' +
+      seg('timer', [['0', 'Off'], ['30', '0:30'], ['60', '1:00'], ['120', '2:00'], ['custom', 'Custom']], timerValue) +
+      (custom ? `<label class="inline-field">Seconds <input id="timerCustom" type="number" inputmode="numeric" min="5" max="900" value="${settings.timer}"></label>` : '') +
+      '<p class="muted">When it runs out the target scores no stars. In a game with a friend it is the time left to bid once someone has bid first.</p></div>' +
+      '<div class="field"><div class="label">Silver robot</div>' +
+      seg('silver', [['true', 'On'], ['false', 'Off']], String(settings.silver)) +
+      '<p class="muted">A fifth robot with no target of its own. Applies to new practice boards.</p></div>' +
+      '<div class="field"><div class="label">Sound</div>' +
+      seg('sound', [['true', 'On'], ['false', 'Off']], String(settings.sound)) + '</div>' +
+      '<button class="btn primary" data-act="home">Done</button>', 'settings');
+  }
+
+  function applySetting(name, value) {
+    if (name === 'difficulty') settings.difficulty = value;
+    else if (name === 'timer') settings.timer = value === 'custom' ? 90 : +value;
+    else if (name === 'silver') settings.silver = value === 'true';
+    else if (name === 'sound') settings.sound = value === 'true';
+    saveSettings();
+    if (name === 'sound' && settings.sound) RR.sound.bid();
+    openSettings();
   }
 
   function openHelp() {
@@ -632,12 +947,13 @@
       '<h2>How to play</h2>' +
       '<ol>' +
       '<li>Each round names a robot and a target. Get that robot to stop exactly on the target. The vortex accepts any robot.</li>' +
-      '<li>Robots slide in a straight line and only stop when they hit a wall or another robot. Use the other robots as blockers.</li>' +
+      '<li>Robots slide in a straight line and only stop when they hit a wall or another robot. Use the other robots as blockers. The silver robot is only ever a blocker.</li>' +
       '<li>Tap a robot to select it, then swipe in a direction. You can also tap one of the ring markers, or anywhere in the robot’s row or column.</li>' +
       '<li>Fewer moves is better. Three stars for matching the best possible solution, two for coming within two moves, one for solving it at all.</li>' +
       '</ol>' +
       '<p class="muted">Hint reveals a little more each time you tap it: the best move count, the robots involved, then the next move. Solution shows every best solution and plays it on the board.</p>' +
-      '<button class="btn primary" data-act="close">Got it</button>');
+      '<p class="muted">With a friend, nobody moves anything at first. Find a route in your head and bid its length. The lowest bid gets to prove it on the board and wins the target.</p>' +
+      '<button class="btn primary" data-act="home">Got it</button>', 'help');
   }
 
   function openSummary() {
@@ -647,15 +963,20 @@
     const perfect = S.results.filter((r) => r.stars === 3).length;
     const moves = solved.reduce((a, r) => a + r.moves, 0);
     const optimal = solved.reduce((a, r) => a + (r.optimal === null ? r.moves : r.optimal), 0);
+    const daily = S.mode === 'daily';
+    const streak = currentStreak(loadStats());
     openDialog(
-      '<h2>Board complete</h2>' +
+      `<h2>${daily ? 'Daily puzzle complete' : 'Board complete'}</h2>` +
       `<div class="big-stars">★ ${stars} <small>of ${rounds * 3}</small></div>` +
+      (daily ? `<div class="streak lit centered">${FLAME}<b>${streak}</b> day streak</div>` : '') +
       '<div class="stats">' +
       `<div><b>${solved.length}/${rounds}</b><span class="muted">solved</span></div>` +
       `<div><b>${perfect}</b><span class="muted">perfect</span></div>` +
       `<div><b>${moves}</b><span class="muted">moves (best ${optimal})</span></div></div>` +
-      '<div class="stack"><button class="btn primary" data-act="new-confirmed">New board</button>' +
-      '<button class="btn quiet" data-act="close">Close</button></div>');
+      '<div class="stack">' +
+      (daily ? '<button class="btn primary" data-act="practice">Keep playing: practice</button>'
+        : '<button class="btn primary" data-act="new-confirmed">New board</button>') +
+      '<button class="btn quiet" data-act="home">Home</button></div>', 'summary');
   }
 
   /* ---------- input ---------- */
@@ -674,24 +995,36 @@
     'pb-play'() { setPlaying(!U.playback.timer); },
     summary: openSummary,
     close: closeDialog,
+    home: openHome,
     help: openHelp,
-    new() {
-      if (S && !S.done && S.results.length > 0) openMenu(true);
-      else actions['new-confirmed']();
+    settings: openSettings,
+    friend() { versus().openEntry(); },
+    daily() { closeDialog(); save(); startDaily(); },
+    practice() {
+      closeDialog();
+      save();
+      const saved = load(KEYS.practice, null);
+      if (saved && saved.v === 2 && !saved.done) adopt(saved);
+      else newPractice();
     },
-    'new-confirmed'() { closeDialog(); newGame(S.difficulty); },
+    new() {
+      openDialog('<h2>Start a new board?</h2><p>Your current practice board will be discarded.</p>' +
+        '<div class="stack"><button class="btn primary" data-act="new-confirmed">Start new board</button>' +
+        '<button class="btn quiet" data-act="home">Cancel</button></div>', 'confirm');
+    },
+    'new-confirmed'() { closeDialog(); save(); U.token++; newPractice(); },
   };
 
   function onAction(e) {
-    const el = e.target.closest('[data-act], [data-diff], [data-step], [data-sol]');
+    const el = e.target.closest('[data-act], [data-set], [data-step], [data-sol], [data-vs]');
     if (!el) return;
-    if (el.dataset.act) {
+    if (el.dataset.vs) {
+      versus().onAction(el.dataset.vs, el);
+    } else if (el.dataset.act) {
       const fn = actions[el.dataset.act];
       if (fn) fn();
-    } else if (el.dataset.diff) {
-      S.difficulty = el.dataset.diff;
-      save();
-      openMenu(false);
+    } else if (el.dataset.set) {
+      applySetting(el.dataset.set, el.dataset.value);
     } else if (el.dataset.step && U.playback) {
       const sol = +el.closest('[data-sol]').dataset.sol;
       if (sol !== U.playback.index) { startPlayback(sol); return; }
@@ -705,8 +1038,18 @@
 
   $('panel').addEventListener('click', onAction);
   $('dialog').addEventListener('click', onAction);
-  $('scrim').addEventListener('click', (e) => { if (e.target === $('scrim')) closeDialog(); });
-  $('menuBtn').addEventListener('click', () => openMenu(false));
+  $('dialog').addEventListener('change', (e) => {
+    if (e.target.id === 'timerCustom') {
+      settings.timer = Math.max(5, Math.min(900, Math.round(+e.target.value) || 60));
+      saveSettings();
+      e.target.value = settings.timer;
+    }
+  });
+  $('scrim').addEventListener('click', (e) => {
+    // Only dialogs that are safe to dismiss close on an outside tap.
+    if (e.target === $('scrim') && S && ['home', 'help', 'settings', 'summary'].indexOf(dialogKind) >= 0) closeDialog();
+  });
+  $('menuBtn').addEventListener('click', openHome);
   $('undoBtn').addEventListener('click', undo);
   $('resetBtn').addEventListener('click', resetRound);
   $('hintBtn').addEventListener('click', hint);
@@ -714,6 +1057,7 @@
     if (U.playback) closeSolutions(); else showSolutions(false);
   });
   $('nextBtn').addEventListener('click', () => next(false));
+  document.addEventListener('pointerdown', () => RR.sound.unlock(), true);
 
   // Board gestures: press a robot to select it, swipe to move, or tap a cell
   // in line with the selected robot.
@@ -725,7 +1069,7 @@
     const cell = rect.width / RR.SIZE;
     let best = -1;
     let bestDist = cell * 0.95;
-    S.robots.forEach((c, i) => {
+    G().robots.forEach((c, i) => {
       const dx = rect.left + ((c % RR.SIZE) + 0.5) * cell - clientX;
       const dy = rect.top + ((c >> 4) + 0.5) * cell - clientY;
       const dist = Math.hypot(dx, dy);
@@ -735,10 +1079,10 @@
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    if (!playable() || S.solved) return;
+    if (!canMove()) return;
     canvas.setPointerCapture(e.pointerId);
     const cell = renderer.cellAt(e.clientX, e.clientY);
-    const hit = S.robots.indexOf(cell);
+    const hit = G().robots.indexOf(cell);
     gesture = { x: e.clientX, y: e.clientY, cell, hit, near: robotNear(e.clientX, e.clientY), moved: false };
     if (hit >= 0 && hit !== U.selected) {
       U.selected = hit;
@@ -762,9 +1106,9 @@
   canvas.addEventListener('pointerup', () => {
     const g = gesture;
     gesture = null;
-    if (!g || g.moved || g.hit >= 0 || g.cell < 0) return;
+    if (!g || g.moved || g.hit >= 0 || g.cell < 0 || !canMove()) return;
     if (U.selected >= 0) {
-      const at = S.robots[U.selected];
+      const at = G().robots[U.selected];
       const dx = (g.cell % RR.SIZE) - (at % RR.SIZE);
       const dy = (g.cell >> 4) - (at >> 4);
       if (dx === 0 && dy !== 0) { move(U.selected, dy > 0 ? RR.S : RR.N); return; }
@@ -779,13 +1123,10 @@
   canvas.addEventListener('pointercancel', () => { gesture = null; });
 
   document.addEventListener('keydown', (e) => {
-    if (!$('scrim').hidden) {
-      if (e.key === 'Escape') closeDialog();
-      return;
-    }
+    if (!$('scrim').hidden) return;
     const dir = { ArrowUp: RR.N, ArrowRight: RR.E, ArrowDown: RR.S, ArrowLeft: RR.W }[e.key];
     if (dir !== undefined && U.selected >= 0) { e.preventDefault(); move(U.selected, dir); return; }
-    if (e.key >= '1' && e.key <= '4' && playable()) { U.selected = +e.key - 1; render(); }
+    if (e.key >= '1' && e.key <= '5' && canMove() && +e.key <= G().robots.length) { U.selected = +e.key - 1; render(); }
     else if (e.key === 'z' || e.key === 'Backspace') undo();
     else if (e.key === 'r') resetRound();
     else if (e.key === 'h') hint();
@@ -804,25 +1145,28 @@
     renderer.refreshTheme();
     drawGoalIcon();
   });
+  document.addEventListener('visibilitychange', () => {
+    lastTick = performance.now();
+    if (document.hidden) save();
+  });
+  setInterval(tick, 200);
+
+  // What versus.js needs from here.
+  RR.app = {
+    settings, saveSettings, render, openDialog, closeDialog, openHome, pickTarget,
+    esc, chip, plural, NAMES, DIFFICULTY,
+    dialogKind: () => dialogKind,
+    animate: (r, from, to) => renderer.animateMove(r, from, to),
+    select(r) { U.selected = r; },
+    // Called when a multiplayer game starts or ends.
+    reset() { U.token++; resetRoundView(); U.dealing = false; U.selected = -1; },
+    state: () => S,
+    view: () => U,
+  };
 
   fitBoard();
-  const saved = load(STORE, null);
-  if (saved && saved.v === 1 && Array.isArray(saved.walls) && saved.walls.length === RR.CELLS) {
-    S = saved;
-    renderer.setBoard(S);
-    if (S.done) render();
-    else if (S.target < 0) deal();
-    else {
-      U.panel = S.solved ? 'solved' : 'play';
-      const color = S.targets[S.target].color;
-      U.selected = color === RR.WILD ? -1 : color;
-      render();
-    }
-  } else {
-    newGame('medium');
-    openHelp();
-  }
-
-  // Test hook; harmless in production.
-  self.__ricochet = { state: () => S, view: () => U };
+  const saved = load(KEYS.practice, null);
+  if (saved && saved.v === 2 && Array.isArray(saved.walls) && saved.walls.length === RR.CELLS) adopt(saved);
+  else newPractice();
+  openHome();
 })();

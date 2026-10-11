@@ -10,7 +10,7 @@
   const OFFSET = [-SIZE, 1, SIZE, -1];
   const OPPOSITE = [S, W, N, E];
   const WILD = 4;
-  const ROBOT_COUNT = 4;
+  const SILVER = 4;
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -120,11 +120,12 @@
     return { walls, targets };
   }
 
-  function randomRobots(rng, board) {
+  // `count` is 4, or 5 to include the silver robot (which has no target of its own).
+  function randomRobots(rng, board, count) {
     const taken = new Set();
     for (const t of board.targets) taken.add(t.y * SIZE + t.x);
     const robots = [];
-    while (robots.length < ROBOT_COUNT) {
+    while (robots.length < count) {
       const x = randInt(rng, 0, SIZE - 1);
       const y = randInt(rng, 0, SIZE - 1);
       const c = y * SIZE + x;
@@ -169,7 +170,7 @@
   }
 
   const api = {
-    SIZE, CELLS, N, E, S, W, BIT, OFFSET, OPPOSITE, WILD, ROBOT_COUNT,
+    SIZE, CELLS, N, E, S, W, BIT, OFFSET, OPPOSITE, WILD, SILVER,
     mulberry32, shuffle, randInt, isCenter,
     generateBoard, randomRobots, slide, replay, isSolved,
   };

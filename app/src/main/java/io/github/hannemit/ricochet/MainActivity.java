@@ -7,6 +7,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -29,6 +30,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Players spend a long time just looking at the board.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         int background = getColor(R.color.app_background);
         FrameLayout frame = new FrameLayout(this);
@@ -57,6 +61,8 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSupportZoom(false);
         settings.setTextZoom(100);
+        // Sound effects are triggered by game events, not always directly by a tap.
+        settings.setMediaPlaybackRequiresUserGesture(false);
         webView.setWebViewClient(new AssetClient());
 
         frame.addView(webView, new FrameLayout.LayoutParams(
@@ -85,7 +91,8 @@ public class MainActivity extends Activity {
                     // Fall through to the empty 404 below.
                 }
             }
-            // Anything that is not a bundled file is refused, so nothing leaves the device.
+            // Page loads only ever come from the bundled files. (Multiplayer uses
+            // WebSocket and WebRTC connections, which do not pass through here.)
             return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found", null,
                     new ByteArrayInputStream(new byte[0]));
         }

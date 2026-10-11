@@ -86,7 +86,7 @@
       wall: cssVar('--wall'),
       center: cssVar('--center'),
       fg: cssVar('--fg'),
-      robots: [cssVar('--r0'), cssVar('--r1'), cssVar('--r2'), cssVar('--r3')],
+      robots: [cssVar('--r0'), cssVar('--r1'), cssVar('--r2'), cssVar('--r3'), cssVar('--r4')],
     };
     this.layerDirty = true;
     this.invalidate();
