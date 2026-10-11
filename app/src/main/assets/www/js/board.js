@@ -48,76 +48,65 @@
     }
   }
 
-  // Lays out a board the way the physical game does: four quadrants, each with
-  // two stub walls on its outer edges and one L-shaped corner per colour, plus
-  // a single wild "vortex" corner somewhere on the board.
-  function generateBoard(seed) {
-    for (let attempt = 0; ; attempt++) {
-      const board = tryGenerate((seed + attempt * 7919) >>> 0);
-      if (board) {
-        board.seed = seed;
-        return board;
-      }
-    }
-  }
+  // The eight quadrant faces of the original board game: four square pieces,
+  // each printed on both sides (A and B). Every face is written in the
+  // orientation it has in the top-left corner, eight cells per row. A cell
+  // lists its walls (N, E, S, W) and, if it holds a target, the target's colour
+  // (Red, Green, Blue, Yellow) and shape (Circle, Triangle, sQuare, Hexagon).
+  // Layout data as transcribed in Michael Fogleman's open-source solver
+  // (github.com/fogleman/Ricochet). It does not include the wild vortex target.
+  const QUADRANTS = [
+    [
+      'NW,N,N,N,NE,NW,N,N,W,S,X,X,X,X,SEYH,W,WE,NWGT,X,X,X,X,N,X,W,X,X,X,X,X,X,X,' +
+      'W,X,X,X,X,X,S,X,SW,X,X,X,X,X,NEBQ,W,NW,X,E,SWRC,X,X,X,S,W,X,X,N,X,X,E,NW',
+      'NW,NE,NW,N,NS,N,N,N,W,S,X,E,NWRC,X,X,X,W,NEGT,W,X,X,X,X,X,W,X,X,X,X,X,SEYH,W,' +
+      'W,X,X,X,X,X,N,X,SW,X,X,X,X,X,X,X,NW,X,E,SWBQ,X,X,X,S,W,X,X,N,X,X,E,NW',
+    ],
+    [
+      'NW,N,N,NE,NW,N,N,N,W,X,X,X,X,E,SWBC,X,W,S,X,X,X,X,N,X,W,NEYT,W,X,X,S,X,X,' +
+      'W,X,X,X,E,NWGQ,X,X,W,X,SERH,W,X,X,X,X,SW,X,N,X,X,X,X,S,NW,X,X,X,X,X,E,NW',
+      'NW,N,N,N,NE,NW,N,N,W,X,SERH,W,X,X,X,X,W,X,N,X,X,X,X,X,WE,SWGQ,X,X,X,X,S,X,' +
+      'SW,N,X,X,X,E,NWYT,X,NW,X,X,X,X,S,X,X,W,X,X,X,X,NEBC,W,S,W,X,X,X,X,X,E,NW',
+    ],
+    [
+      'NW,N,N,NE,NW,N,N,N,W,X,X,X,X,SEGH,W,X,WE,SWRQ,X,X,X,N,X,X,SW,N,X,X,X,X,S,X,' +
+      'NW,X,X,X,X,E,NWYC,X,W,X,S,X,X,X,X,X,W,X,NEBT,W,X,X,X,S,W,X,X,X,X,X,E,NW',
+      'NW,N,NS,N,NE,NW,N,N,W,E,NWYC,X,X,X,X,X,W,X,X,X,X,X,X,X,W,X,X,X,X,E,SWBT,X,' +
+      'SW,X,X,X,S,X,N,X,NW,X,X,X,NERQ,W,X,X,W,SEGH,W,X,X,X,X,S,W,N,X,X,X,X,E,NW',
+    ],
+    [
+      'NW,N,N,NE,NW,N,N,N,W,X,X,X,X,X,X,X,W,X,X,X,X,SEBH,W,X,W,X,S,X,X,N,X,X,' +
+      'SW,X,NEGC,W,X,X,X,X,NW,S,X,X,X,X,E,SWRT,WE,NWYQ,X,X,X,X,X,NS,W,X,X,X,X,X,E,NW',
+      'NW,N,N,NE,NW,N,N,N,WE,SWRT,X,X,X,X,S,X,W,N,X,X,X,X,NEGC,W,W,X,X,X,X,X,X,X,' +
+      'W,X,SEBH,W,X,X,X,S,SW,X,N,X,X,X,E,NWYQ,NW,X,X,X,X,X,X,S,W,X,X,X,X,X,E,NW',
+    ],
+  ];
 
-  function tryGenerate(seed) {
+  // Builds a board the way players do: pick a side of each of the four
+  // pieces, shuffle them, and turn each so its notched corner meets the centre.
+  function generateBoard(seed) {
     const rng = mulberry32(seed);
     const walls = new Array(CELLS).fill(0);
-
-    for (let i = 0; i < SIZE; i++) {
-      addWall(walls, i, 0, N);
-      addWall(walls, i, SIZE - 1, S);
-      addWall(walls, 0, i, W);
-      addWall(walls, SIZE - 1, i, E);
-    }
-    addWall(walls, 7, 7, N); addWall(walls, 7, 7, W);
-    addWall(walls, 8, 7, N); addWall(walls, 8, 7, E);
-    addWall(walls, 7, 8, S); addWall(walls, 7, 8, W);
-    addWall(walls, 8, 8, S); addWall(walls, 8, 8, E);
-
-    // Stub walls: one per half of every outer edge.
-    for (const base of [1, 9]) {
-      addWall(walls, randInt(rng, base, base + 4), 0, E);
-      addWall(walls, randInt(rng, base, base + 4), SIZE - 1, E);
-      addWall(walls, 0, randInt(rng, base, base + 4), S);
-      addWall(walls, SIZE - 1, randInt(rng, base, base + 4), S);
-    }
-
     const targets = [];
-    const wildQuadrant = randInt(rng, 0, 3);
-    for (let q = 0; q < 4; q++) {
-      const x0 = (q & 1) ? 8 : 0;
-      const y0 = (q & 2) ? 8 : 0;
-      const colors = shuffle(rng, [0, 1, 2, 3]);
-      if (q === wildQuadrant) colors.push(WILD);
-      const corners = shuffle(rng, [0, 1, 2, 3]);
-      for (let k = 0; k < colors.length; k++) {
-        let placed = false;
-        for (let tries = 0; tries < 200 && !placed; tries++) {
-          const x = x0 + randInt(rng, 0, 7);
-          const y = y0 + randInt(rng, 0, 7);
-          if (x < 1 || x > 14 || y < 1 || y > 14) continue;
-          if (x >= 6 && x <= 9 && y >= 6 && y <= 9) continue;
-          let clash = false;
-          for (const t of targets) {
-            if (Math.abs(t.x - x) < 2 && Math.abs(t.y - y) < 2) { clash = true; break; }
-          }
-          if (clash) continue;
-          const corner = corners[k % 4];
-          addWall(walls, x, y, (corner & 1) ? N : S);
-          addWall(walls, x, y, (corner & 2) ? E : W);
-          const color = colors[k];
-          targets.push({
-            x, y, color,
-            shape: color === WILD ? WILD : (color + q) % 4,
-          });
-          placed = true;
+    const faces = shuffle(rng, QUADRANTS.map((pair) => pair[rng() < 0.5 ? 0 : 1]));
+    const corners = [[0, 0], [8, 0], [8, 8], [0, 8]]; // clockwise from top-left
+    faces.forEach((face, turns) => {
+      const [x0, y0] = corners[turns];
+      face.split(',').forEach((cell, i) => {
+        let x = i % 8;
+        let y = i >> 3;
+        for (let k = 0; k < turns; k++) { const t = x; x = 7 - y; y = t; }
+        for (const ch of cell) {
+          const dir = 'NESW'.indexOf(ch);
+          if (dir >= 0) addWall(walls, x0 + x, y0 + y, (dir + turns) % 4);
         }
-        if (!placed) return null;
-      }
-    }
-    return { walls, targets };
+        const target = /([RGBY])([CTQH])/.exec(cell);
+        if (target) {
+          targets.push({ x: x0 + x, y: y0 + y, color: 'RGBY'.indexOf(target[1]), shape: 'CTQH'.indexOf(target[2]) });
+        }
+      });
+    });
+    return { seed, walls, targets };
   }
 
   // `count` is 4, or 5 to include the silver robot (which has no target of its own).

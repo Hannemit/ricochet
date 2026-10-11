@@ -38,10 +38,12 @@ for (let seed = 1; seed <= 40; seed++) {
   const board = RR.generateBoard(seed);
   boards++;
 
-  // Structure: 17 targets, one of each colour/shape pair plus the vortex.
-  assert.strictEqual(board.targets.length, 17);
+  // Structure: 16 targets, one of each colour/shape pair.
+  assert.strictEqual(board.targets.length, 16);
   const kinds = new Set(board.targets.map((t) => t.color + ':' + t.shape));
-  assert.strictEqual(kinds.size, 17);
+  assert.strictEqual(kinds.size, 16);
+  // Walls only around the centre block, and nothing else is sealed off.
+  for (const c of [119, 120, 135, 136]) assert.strictEqual(board.walls[c] & 15, [9, 3, 12, 6][[119, 120, 135, 136].indexOf(c)]);
   // Walls are mirrored on both sides.
   for (let c = 0; c < 256; c++) {
     for (let d = 0; d < 4; d++) {
@@ -57,7 +59,7 @@ for (let seed = 1; seed <= 40; seed++) {
   for (let i = 0; i < 6; i++) {
     // Alternate between four robots and five (with the silver one).
     const robots = RR.randomRobots(rng, board, 4 + ((seed + i) & 1));
-    const t = board.targets[RR.randInt(rng, 0, 16)];
+    const t = board.targets[RR.randInt(rng, 0, 15)];
     const cell = t.y * 16 + t.x;
     const active = t.color === RR.WILD ? -1 : t.color;
     const t0 = Date.now();

@@ -2,7 +2,8 @@
 
 A Ricochet Robots puzzle game for Android. Solo play works fully offline.
 
-- Randomly generated 16×16 boards with 17 targets, with an optional fifth silver robot
+- The boards of the original game: its eight quadrant faces, combined and rotated at random
+- Optional fifth silver robot, and robots with their own hair and expressions
 - An exact solver that knows the fewest moves for every target
 - Three-step hints: best move count, robots involved, next move
 - Every distinct best solution, replayable step by step on the board
@@ -31,3 +32,8 @@ node tests/net.test.js        # checks the multiplayer relay is reachable (needs
 
 The game itself is a plain web page in `app/src/main/assets/www`, hosted in a WebView.
 Serve that folder with any static file server to play it in a desktop browser.
+
+## Credits
+
+The quadrant layouts in `board.js` follow the transcription of the original boards in
+Michael Fogleman's [Ricochet](https://github.com/fogleman/Ricochet) solver.

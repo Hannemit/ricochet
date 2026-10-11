@@ -75,6 +75,7 @@
     this.anim = null;
     this.frame = 0;
     this.theme = {};
+    this.look = { hair: true, expressions: true };
     this.refreshTheme();
   }
 
@@ -225,9 +226,79 @@
     return [((cell % SIZE) + 0.5) * this.cell, ((cell >> 4) + 0.5) * this.cell];
   };
 
-  Renderer.prototype.drawRobot = function (ctx, x, y, color, selected) {
+  // Each robot gets its own hairdo, drawn behind the body so it pokes out on top.
+  function drawHair(ctx, x, y, r, index) {
+    ctx.beginPath();
+    if (index === 0) {
+      // Three spikes.
+      for (let i = -1; i <= 1; i++) {
+        ctx.moveTo(x + i * r * 0.42 - r * 0.24, y - r * 0.78);
+        ctx.lineTo(x + i * r * 0.5, y - r * (i ? 1.3 : 1.48));
+        ctx.lineTo(x + i * r * 0.42 + r * 0.24, y - r * 0.78);
+      }
+      ctx.fill();
+    } else if (index === 1) {
+      // A sprout with two leaves.
+      ctx.ellipse(x - r * 0.26, y - r * 1.18, r * 0.3, r * 0.16, -0.5, 0, TAU);
+      ctx.ellipse(x + r * 0.26, y - r * 1.18, r * 0.3, r * 0.16, 0.5, 0, TAU);
+      ctx.rect(x - r * 0.07, y - r * 1.15, r * 0.14, r * 0.3);
+      ctx.fill();
+    } else if (index === 2) {
+      // A swept-over quiff.
+      ctx.moveTo(x - r * 0.7, y - r * 0.68);
+      ctx.quadraticCurveTo(x - r * 0.5, y - r * 1.55, x + r * 0.55, y - r * 1.2);
+      ctx.quadraticCurveTo(x + r * 0.1, y - r * 1.05, x + r * 0.5, y - r * 0.8);
+      ctx.fill();
+    } else if (index === 3) {
+      // Two buns.
+      ctx.arc(x - r * 0.62, y - r * 0.86, r * 0.34, 0, TAU);
+      ctx.arc(x + r * 0.62, y - r * 0.86, r * 0.34, 0, TAU);
+      ctx.fill();
+    } else {
+      // An antenna.
+      ctx.rect(x - r * 0.06, y - r * 1.3, r * 0.12, r * 0.4);
+      ctx.arc(x, y - r * 1.32, r * 0.19, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  // mood: -1 for the plain smile every robot shares, otherwise the robot's
+  // own expression (0-4), or 5 for the grin of a robot that reached its target.
+  function drawMouth(ctx, x, y, r, mood) {
+    const my = y + r * 0.5;
+    ctx.lineWidth = Math.max(1, r * 0.13);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (mood === 5) {
+      ctx.arc(x, my - r * 0.12, r * 0.36, 0.1, Math.PI - 0.1);
+      ctx.closePath();
+      ctx.fill();
+    } else if (mood === 1) {
+      ctx.ellipse(x, my + r * 0.02, r * 0.13, r * 0.17, 0, 0, TAU);
+      ctx.fill();
+    } else if (mood === 2) {
+      ctx.moveTo(x - r * 0.24, my + r * 0.06);
+      ctx.quadraticCurveTo(x + r * 0.05, my + r * 0.16, x + r * 0.28, my - r * 0.1);
+      ctx.stroke();
+    } else if (mood === 3) {
+      ctx.arc(x, my - r * 0.06, r * 0.26, 0, Math.PI);
+      ctx.closePath();
+      ctx.fill();
+    } else if (mood === 4) {
+      ctx.moveTo(x - r * 0.2, my + r * 0.04);
+      ctx.lineTo(x + r * 0.2, my + r * 0.04);
+      ctx.stroke();
+    } else {
+      ctx.arc(x, my - r * 0.14, r * (mood === 0 ? 0.3 : 0.24), 0.5, Math.PI - 0.5);
+      ctx.stroke();
+    }
+  }
+
+  Renderer.prototype.drawRobot = function (ctx, x, y, index, selected, happy) {
     const s = this.cell;
     const r = s * 0.37;
+    const color = this.theme.robots[index];
+    const look = this.look;
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
     ctx.beginPath();
@@ -240,6 +311,13 @@
       ctx.beginPath();
       ctx.arc(x, y, r + s * 0.085, 0, TAU);
       ctx.stroke();
+    }
+
+    if (look.hair) {
+      ctx.fillStyle = color;
+      drawHair(ctx, x, y, r, index);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      drawHair(ctx, x, y, r, index);
     }
 
     const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.45, r * 0.1, x, y, r);
@@ -255,13 +333,17 @@
 
     // Visor with two eyes.
     ctx.fillStyle = 'rgba(16,18,28,0.82)';
-    roundRect(ctx, x - r * 0.62, y - r * 0.34, r * 1.24, r * 0.56, r * 0.28);
+    roundRect(ctx, x - r * 0.62, y - r * 0.4, r * 1.24, r * 0.56, r * 0.28);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.beginPath();
-    ctx.arc(x - r * 0.28, y - r * 0.06, r * 0.13, 0, TAU);
-    ctx.arc(x + r * 0.28, y - r * 0.06, r * 0.13, 0, TAU);
+    ctx.arc(x - r * 0.28, y - r * 0.12, r * 0.13, 0, TAU);
+    ctx.arc(x + r * 0.28, y - r * 0.12, r * 0.13, 0, TAU);
     ctx.fill();
+
+    ctx.fillStyle = 'rgba(16,18,28,0.85)';
+    ctx.strokeStyle = 'rgba(16,18,28,0.85)';
+    drawMouth(ctx, x, y, r, look.expressions ? (happy ? 5 : index) : -1);
     ctx.restore();
   };
 
@@ -330,7 +412,7 @@
     sc.robots.forEach((cell, i) => {
       let p = this.center(cell);
       if (animPos && this.anim && this.anim.r === i) p = animPos;
-      this.drawRobot(ctx, p[0], p[1], th.robots[i], i === sc.selected);
+      this.drawRobot(ctx, p[0], p[1], i, i === sc.selected, sc.happy === i);
     });
 
     // Hint arrow, gently pulsing.

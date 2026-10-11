@@ -62,12 +62,20 @@
     difficulty: 'medium',
     timer: 60,       // seconds per target; 0 turns the timer off
     silver: true,
+    guides: true,       // ring markers showing where the selected robot would stop
+    hair: true,
+    expressions: true,
     sound: true,
     name: '',
     pid: Math.random().toString(36).slice(2, 10),
   }, load(KEYS.settings, {}));
   if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'medium';
-  const saveSettings = () => { store(KEYS.settings, settings); RR.sound.enabled = settings.sound; };
+  function saveSettings() {
+    store(KEYS.settings, settings);
+    RR.sound.enabled = settings.sound;
+    renderer.look = { hair: settings.hair, expressions: settings.expressions };
+    renderer.invalidate();
+  }
   saveSettings();
 
   function save() {
@@ -807,7 +815,7 @@
       const ghosts = [];
       const movable = canMove();
       if (U.selected >= g.robots.length) U.selected = -1;
-      if (movable && U.selected >= 0) {
+      if (movable && settings.guides && U.selected >= 0) {
         for (let d = 0; d < 4; d++) {
           const to = RR.slide(g.walls, g.robots, U.selected, d);
           if (to !== g.robots[U.selected]) ghosts.push(to);
@@ -821,6 +829,13 @@
         ghosts,
         hint: vs ? null : U.hintArrow,
       };
+    }
+    // The robot that has reached the target gets a grin.
+    scene.happy = -1;
+    if (g.target >= 0) {
+      const t = g.targets[g.target];
+      const at = scene.robots.indexOf(t.y * RR.SIZE + t.x);
+      if (at >= 0 && (t.color === RR.WILD || t.color === at)) scene.happy = at;
     }
     renderer.setScene(scene);
 
@@ -938,6 +953,14 @@
       '<div class="field"><div class="label">Silver robot</div>' +
       seg('silver', [['true', 'On'], ['false', 'Off']], String(settings.silver)) +
       '<p class="muted">A fifth robot with no target of its own. Applies to new practice boards.</p></div>' +
+      '<div class="field"><div class="label">Guide markers</div>' +
+      seg('guides', [['true', 'On'], ['false', 'Off']], String(settings.guides)) +
+      '<p class="muted">Rings that show where the selected robot would stop.</p></div>' +
+      '<div class="field"><div class="label">Robot hair</div>' +
+      seg('hair', [['true', 'Hairy'], ['false', 'Bald']], String(settings.hair)) + '</div>' +
+      '<div class="field"><div class="label">Robot expressions</div>' +
+      seg('expressions', [['true', 'On'], ['false', 'Off']], String(settings.expressions)) +
+      '<p class="muted">Off gives every robot the same small smile.</p></div>' +
       '<div class="field"><div class="label">Sound</div>' +
       seg('sound', [['true', 'On'], ['false', 'Off']], String(settings.sound)) + '</div>' +
       '<button class="btn primary" data-act="home">Done</button>', 'settings');
@@ -946,7 +969,7 @@
   function applySetting(name, value) {
     if (name === 'difficulty') settings.difficulty = value;
     else if (name === 'timer') settings.timer = value === 'custom' ? 90 : +value;
-    else if (name === 'silver') settings.silver = value === 'true';
+    else if (name === 'silver' || name === 'guides' || name === 'hair' || name === 'expressions') settings[name] = value === 'true';
     else if (name === 'sound') settings.sound = value === 'true';
     saveSettings();
     if (name === 'sound' && settings.sound) RR.sound.bid();
@@ -957,9 +980,9 @@
     openDialog(
       '<h2>How to play</h2>' +
       '<ol>' +
-      '<li>Each round names a robot and a target. Get that robot to stop exactly on the target. The vortex accepts any robot.</li>' +
+      '<li>Each round names a robot and a target. Get that robot to stop exactly on the target.</li>' +
       '<li>Robots slide in a straight line and only stop when they hit a wall or another robot. Use the other robots as blockers. The silver robot is only ever a blocker.</li>' +
-      '<li>Tap a robot to select it, then swipe in a direction. You can also tap one of the ring markers, or anywhere in the robot’s row or column.</li>' +
+      '<li>Tap a robot to select it, then swipe in a direction. You can also tap anywhere in the robot’s row or column.</li>' +
       '<li>Fewer moves is better. Three stars for matching the best possible solution, two for coming within two moves, one for solving it at all.</li>' +
       '</ol>' +
       '<p class="muted">Hint reveals a little more each time you tap it: the best move count, the robots involved, then the next move. Solution shows every best solution and plays it on the board.</p>' +

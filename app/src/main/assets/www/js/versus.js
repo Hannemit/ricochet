@@ -760,7 +760,7 @@
     let body;
     if (host) {
       const s = app.settings;
-      const rounds = [5, 9, 17].map((n) =>
+      const rounds = [5, 9, 16].map((n) =>
         `<button role="radio" aria-checked="${v.cfg.rounds === n}" data-vs="rounds" data-value="${n}">${n}</button>`).join('');
       const timer = s.timer > 0 ? s.timer : 60;
       body = `<div class="field"><div class="label">Targets to play</div><div class="seg" role="radiogroup">${rounds}</div></div>` +
