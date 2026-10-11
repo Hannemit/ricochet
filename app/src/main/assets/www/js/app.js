@@ -39,6 +39,7 @@
     thinking: false,
     dealing: false,
     playback: null,
+    draft: 5,   // bid being composed in practice bidding
     token: 0,   // bumps when a new round is dealt or the game changes
     stamp: 0,   // bumps on every change to the robots
   };
@@ -62,6 +63,7 @@
     difficulty: 'medium',
     timer: 60,       // seconds per target; 0 turns the timer off
     silver: true,
+    bidding: false,     // practice: bid a move count first, then prove it
     guides: true,       // ring markers showing where the selected robot would stop
     hair: true,
     expressions: true,
@@ -194,6 +196,8 @@
     return {
       target: -1, start: null, moves: [], solved: false, best: null, bestEnd: null,
       revealed: false, timedOut: false, hintMove: false, bestShown: false, opt: null, timeLeft: null,
+      // Bidding rounds: the bid being proved, the lowest bid proved, failed bids.
+      bidding: false, bid: null, bestBid: null, bidFails: 0, hintUsed: false,
     };
   }
 
@@ -334,6 +338,8 @@
     S.start = S.robots.slice();
     S.opt = pick.opt;
     S.timeLeft = settings.timer > 0 ? settings.timer * 1000 : null;
+    S.bidding = S.mode === 'practice' && settings.bidding;
+    U.draft = 5;
     U.dealing = false;
     const color = S.targets[S.target].color;
     U.selected = color === RR.WILD ? -1 : color;
@@ -348,7 +354,22 @@
   // Whether the player may move robots right now.
   function canMove() {
     if (versus().active()) return !U.playback && versus().canMove();
-    return playable() && !S.solved;
+    return playable() && !S.solved && !bidLocked();
+  }
+
+  // In a bidding round the robots stay put until a bid is made. Seeing the
+  // solution or running out of time ends the bidding and frees the board.
+  const bidLocked = () => S.bidding && S.bid === null && !S.revealed && !S.timedOut;
+  const proving = () => S.bidding && S.bid !== null && !S.solved && !S.revealed && !S.timedOut;
+
+  function placeBid() {
+    if (!playable() || !bidLocked()) return;
+    S.bid = Math.max(1, Math.min(30, U.draft));
+    U.panel = 'play';
+    clearHint();
+    RR.sound.bid();
+    save();
+    render();
   }
 
   function clearHint() {
@@ -378,8 +399,20 @@
         S.best = S.moves.length;
         S.bestEnd = S.robots.slice();
       }
+      if (S.bidding && S.bid !== null && (S.bestBid == null || S.bid < S.bestBid)) S.bestBid = S.bid;
       U.panel = 'solved';
       RR.sound.solved(!!S.opt && S.moves.length <= S.opt.depth);
+    } else if (proving() && S.moves.length >= S.bid) {
+      // Out of moves: the bid failed. Back to the start to bid again.
+      S.bidFails++;
+      S.bid = null;
+      S.robots = S.start.slice();
+      S.moves = [];
+      U.panel = 'bidfail';
+      RR.sound.fail();
+      save();
+      render();
+      return;
     }
     save();
     render();
@@ -387,7 +420,7 @@
   }
 
   function undo() {
-    if (!playable() || !S.moves.length) return;
+    if (!playable() || !S.moves.length || proving()) return;
     const m = S.moves.pop();
     S.robots[m.r] = m.from;
     S.solved = false;
@@ -401,11 +434,12 @@
   }
 
   function resetRound() {
-    if (versus().active() || !S || S.done || U.dealing || S.target < 0) return;
+    if (versus().active() || !S || S.done || U.dealing || S.target < 0 || proving()) return;
     stopPlayback();
     S.robots = S.start.slice();
     S.moves = [];
     S.solved = false;
+    S.bid = null;
     U.stamp++;
     clearHint();
     U.panel = 'play';
@@ -433,6 +467,7 @@
     }
     if (U.hint.depth > 0) {
       U.hintLevel = Math.min(3, U.hintLevel + 1);
+      S.hintUsed = true;
       if (U.hint.fromStart) S.bestShown = true;
       if (U.hintLevel === 3) {
         const m = U.hint.moves[0];
@@ -469,8 +504,11 @@
   function starsFor() {
     if (S.best === null || S.revealed || S.timedOut) return 0;
     const opt = S.opt ? S.opt.depth : S.best;
-    let stars = S.best <= opt ? 3 : S.best <= opt + 2 ? 2 : 1;
-    if (S.hintMove) stars = Math.min(stars, 2);
+    // A bidding round is scored on the bid that was proved, not the moves used.
+    const scored = S.bestBid != null ? S.bestBid : S.best;
+    let stars = scored <= opt ? 3 : scored <= opt + 2 ? 2 : 1;
+    if (S.hintMove || (S.bidding && S.hintUsed)) stars = Math.min(stars, 2);
+    if (S.bidFails) stars = Math.min(stars, Math.max(1, 3 - S.bidFails));
     return stars;
   }
 
@@ -534,7 +572,7 @@
 
   function soloTimerRunning() {
     return S && !versus().active() && S.timeLeft !== null && !S.done && !U.dealing && S.target >= 0 &&
-      !roundClosed() && $('scrim').hidden && !homeShown() && !document.hidden;
+      !roundClosed() && !proving() && $('scrim').hidden && !homeShown() && !document.hidden;
   }
 
   function tick() {
@@ -746,10 +784,16 @@
       if (!S.opt) note = 'Nicely done.';
       else if (n <= S.opt.depth) note = 'That is the best possible.';
       else note = `The best possible is ${plural(S.opt.depth, 'move')}.`;
+      if (S.bidding && S.bestBid != null && !S.timedOut && !S.revealed) {
+        if (S.opt && S.bestBid > S.opt.depth) note = `You bid ${S.bestBid}. The best possible is ${plural(S.opt.depth, 'move')}.`;
+        else if (S.opt) note = `You bid ${S.bestBid}, and that is the best possible.`;
+        if (S.bidFails) note += ` ${plural(S.bidFails, 'failed bid')} cost you.`;
+        else if (S.hintUsed && stars === 2 && S.opt && S.bestBid <= S.opt.depth) note += ' One star off for the hint.';
+      }
       if (S.timedOut) note += ' No stars after the timer ran out.';
       else if (S.revealed) note += ' No stars after seeing the solution.';
       else if (S.hintMove && stars === 2 && n <= (S.opt ? S.opt.depth : n)) note += ' One star off for the move hint.';
-      const canImprove = S.opt && n > S.opt.depth;
+      const canImprove = S.opt && (S.bestBid != null ? S.bestBid : n) > S.opt.depth;
       return `<div class="card result"><div class="stars">${starsHtml(stars)}</div>` +
         `<div class="result-text"><b>Solved in ${plural(n, 'move')}</b><span>${note}</span></div></div>` +
         '<div class="row">' +
@@ -758,6 +802,21 @@
         '<button class="btn primary" data-act="next">Next target</button></div>';
     }
     const hint = hintHtml();
+    if (bidLocked()) {
+      U.draft = Math.max(1, Math.min(30, U.draft));
+      const lead = U.panel === 'bidfail'
+        ? '<p><b>Bid failed.</b> You ran out of moves, so the robots are back at the start. Bid again.</p>'
+        : '<p>Find a route in your head, then bid how many moves it takes. The robots stay locked until you bid.</p>';
+      return (hint || `<div class="card">${lead}</div>`) +
+        '<div class="row bidrow"><div class="stepper"><button data-act="bid-minus" aria-label="Fewer">−</button>' +
+        `<b>${U.draft}</b><button data-act="bid-plus" aria-label="More">+</button></div>` +
+        `<button class="btn primary" data-act="bid">Bid ${U.draft}</button></div>`;
+    }
+    if (proving()) {
+      const trail = S.moves.map((m) => chip(m)).join('');
+      return (hint || '') + `<div class="card"><p>You bid <b>${S.bid}</b>. Reach the target in ${plural(S.bid, 'move')} or fewer. There is no undo.</p>` +
+        `<div class="chips">${trail}<span class="muted">${S.moves.length} of ${S.bid}</span></div></div>`;
+    }
     if (hint) return hint;
     if (!S.moves.length) {
       return '<p class="tip">Tap a robot, then swipe to send it sliding. It only stops at a wall or another robot.</p>';
@@ -852,8 +911,8 @@
       $('nextLabel').textContent = 'Next';
     } else {
       const idle = !S.done && !U.dealing && hasTarget;
-      $('undoBtn').disabled = !idle || !!pb || !S.moves.length;
-      $('resetBtn').disabled = !idle || (!S.moves.length && !pb);
+      $('undoBtn').disabled = !idle || !!pb || !S.moves.length || proving();
+      $('resetBtn').disabled = !idle || (!S.moves.length && !pb) || proving();
       $('hintBtn').disabled = !idle || !!pb || S.solved;
       $('solutionBtn').disabled = !idle || !S.opt;
       $('nextBtn').disabled = !idle;
@@ -953,6 +1012,9 @@
       '<div class="field"><div class="label">Silver robot</div>' +
       seg('silver', [['true', 'On'], ['false', 'Off']], String(settings.silver)) +
       '<p class="muted">A fifth robot with no target of its own. Applies to new practice boards.</p></div>' +
+      '<div class="field"><div class="label">Bidding in practice</div>' +
+      seg('bidding', [['true', 'On'], ['false', 'Off']], String(settings.bidding)) +
+      '<p class="muted">Bid a number of moves before touching the board, then prove it, as in the tabletop game. Applies from the next target.</p></div>' +
       '<div class="field"><div class="label">Guide markers</div>' +
       seg('guides', [['true', 'On'], ['false', 'Off']], String(settings.guides)) +
       '<p class="muted">Rings that show where the selected robot would stop.</p></div>' +
@@ -969,7 +1031,7 @@
   function applySetting(name, value) {
     if (name === 'difficulty') settings.difficulty = value;
     else if (name === 'timer') settings.timer = value === 'custom' ? 90 : +value;
-    else if (name === 'silver' || name === 'guides' || name === 'hair' || name === 'expressions') settings[name] = value === 'true';
+    else if (name === 'silver' || name === 'bidding' || name === 'guides' || name === 'hair' || name === 'expressions') settings[name] = value === 'true';
     else if (name === 'sound') settings.sound = value === 'true';
     saveSettings();
     if (name === 'sound' && settings.sound) RR.sound.bid();
@@ -1017,6 +1079,9 @@
 
   const actions = {
     cancel() { U.panel = S.solved ? 'solved' : 'play'; render(); },
+    bid: placeBid,
+    'bid-minus'() { U.draft--; render(); },
+    'bid-plus'() { U.draft++; render(); },
     reveal() { showSolutions(true); },
     skip() { next(true); },
     next() { next(false); },

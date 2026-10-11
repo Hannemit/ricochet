@@ -8,7 +8,7 @@ A Ricochet Robots puzzle game for Android. Solo play works fully offline.
 - Three-step hints: best move count, robots involved, next move
 - Every distinct best solution, replayable step by step on the board
 - A daily puzzle (five targets, the same for everyone that day) with a streak counter
-- Unlimited practice boards at easy, medium or hard difficulty
+- Unlimited practice boards at easy, medium or hard difficulty, optionally with bidding
 - A per-target timer (one minute by default, adjustable or off)
 - Play with a friend over the internet: share a five-letter code, bid, and prove your bid
 
