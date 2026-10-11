@@ -1,6 +1,7 @@
 package io.github.hannemit.ricochet;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
@@ -8,6 +9,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -64,6 +66,8 @@ public class MainActivity extends Activity {
         // Sound effects are triggered by game events, not always directly by a tap.
         settings.setMediaPlaybackRequiresUserGesture(false);
         webView.setWebViewClient(new AssetClient());
+        // Only the bundled page is ever loaded, so it alone can reach the bridge.
+        webView.addJavascriptInterface(new Bridge(), "Android");
 
         frame.addView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -76,6 +80,17 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         webView.destroy();
         super.onDestroy();
+    }
+
+    /** What the page can ask the app to do; called as {@code Android.share(text)}. */
+    private final class Bridge {
+        @JavascriptInterface
+        public void share(String text) {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_TEXT, text);
+            runOnUiThread(() -> startActivity(Intent.createChooser(send, null)));
+        }
     }
 
     private final class AssetClient extends WebViewClient {

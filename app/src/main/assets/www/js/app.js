@@ -1070,9 +1070,43 @@
       `<div><b>${perfect}</b><span class="muted">perfect</span></div>` +
       `<div><b>${moves}</b><span class="muted">moves (best ${optimal})</span></div></div>` +
       '<div class="stack">' +
-      (daily ? '<button class="btn primary" data-act="practice">Keep playing: practice</button>'
+      (daily ? '<button class="btn primary" id="shareBtn" data-act="share">Share result</button>' +
+        '<button class="btn" data-act="practice">Keep playing: practice</button>'
         : '<button class="btn primary" data-act="new-confirmed">New board</button>') +
       '<button class="btn quiet" data-act="home">Home</button></div>', 'summary');
+  }
+
+  // A short text overview of a finished daily puzzle, for sending to friends.
+  // It gives scores only, so it does not spoil the puzzle.
+  function shareText() {
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const d = S.date.split('-');
+    const stars = S.results.reduce((a, r) => a + r.stars, 0);
+    const solved = S.results.filter((r) => r.moves !== null).length;
+    const perfect = S.results.filter((r) => r.stars === 3).length;
+    const streak = currentStreak(loadStats());
+    const lines = S.results.map((r, i) => {
+      let note = 'not solved';
+      if (r.moves !== null) {
+        note = plural(r.moves, 'move');
+        if (r.optimal !== null && r.moves > r.optimal) note += ` (best ${r.optimal})`;
+      }
+      return `${i + 1}. ${'★'.repeat(r.stars)}${'☆'.repeat(3 - r.stars)} ${note}`;
+    });
+    return `Ricochet daily · ${+d[2]} ${MONTHS[d[1] - 1]} ${d[0]}\n` +
+      `★ ${stars}/${S.results.length * 3}` + (streak > 1 ? ` · 🔥 ${streak} day streak` : '') + '\n\n' +
+      lines.join('\n') + '\n\n' +
+      `Solved ${solved}/${S.results.length} · ${perfect} perfect\n` +
+      'https://github.com/Hannemit/ricochet/releases/latest';
+  }
+
+  function share() {
+    const text = shareText();
+    // In the Android app this opens the system share sheet.
+    if (window.Android && window.Android.share) { window.Android.share(text); return; }
+    if (navigator.share) { navigator.share({ text }).catch(() => {}); return; }
+    const done = () => { const b = $('shareBtn'); if (b) b.textContent = 'Copied to clipboard'; };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => {});
   }
 
   /* ---------- input ---------- */
@@ -1093,6 +1127,7 @@
     'pb-next'() { setPlaying(false); stepPlayback(1); },
     'pb-play'() { setPlaying(!U.playback.timer); },
     summary: openSummary,
+    share,
     close: closeDialog,
     home() { closeDialog(); showHome(); },
     help: openHelp,
