@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A red robot's path bouncing off a wall, with the other three robots waiting. -->
+    <path
+        android:pathData="M36,72 L36,38 L70,38"
+        android:strokeColor="#66E5484D"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M28,29 L44,29 M28,29 L28,45"
+        android:strokeColor="#E8EBF5"
+        android:strokeWidth="5"
+        android:strokeLineCap="round" />
+    <path android:fillColor="#E5484D" android:pathData="M70,38m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0" />
+    <path android:fillColor="#3B82F6" android:pathData="M36,72m-9,0a9,9 0,1 1,18 0a9,9 0,1 1,-18 0" />
+    <path android:fillColor="#F2B01E" android:pathData="M70,72m-9,0a9,9 0,1 1,18 0a9,9 0,1 1,-18 0" />
+    <path android:fillColor="#2FA36B" android:pathData="M53,55m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+</vector>

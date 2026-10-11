@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.hannemit.ricochet'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.hannemit.ricochet'
+        minSdk 26
+        targetSdk 35
+        // CI passes its run number so each published build installs over the last.
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        versionName "1.0.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
+    }
+
+    // One fixed key, kept in the repo, signs every build. That lets an APK from
+    // CI install over one built locally without uninstalling first. The app is
+    // only ever sideloaded, so this key is not a secret.
+    signingConfigs {
+        shared {
+            storeFile file('sideload.keystore')
+            storePassword 'android'
+            keyAlias 'ricochet'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
