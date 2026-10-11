@@ -17,6 +17,7 @@
   --r3: #f2b01e;
   --r4: #8d95a8;
   --warn: #d6453d;
+  --timer: #ff2b2b;
   --on-primary: #ffffff;
   --shadow: 0 1px 2px rgba(20, 24, 40, 0.08), 0 6px 18px rgba(20, 24, 40, 0.07);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -40,6 +41,7 @@
     --r3: #f7c137;
     --r4: #b9c0d0;
     --warn: #ff7a70;
+    --timer: #ff3b3b;
     --on-primary: #0f1119;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
     color-scheme: dark;
@@ -105,7 +107,7 @@ h1 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px 8px 10px;
+  padding: 8px 14px 14px 10px;
   background: var(--surface);
   border-radius: 16px;
   box-shadow: var(--shadow);
@@ -113,11 +115,11 @@ h1 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
   position: relative;
   overflow: hidden;
 }
-#timeText { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--fg); }
-#timeText.low { color: var(--warn); }
-.timebar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; }
-.timebar i { display: block; height: 100%; width: 0; background: var(--fg); opacity: 0.55; transition: width 0.2s linear; }
-.timebar i.low { background: var(--warn); opacity: 1; }
+#timeText { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 13px; color: var(--timer); letter-spacing: 0.02em; }
+.timebar { position: absolute; left: 0; right: 0; bottom: 0; height: 9px; background: var(--line); }
+.timebar i { display: block; height: 100%; width: 0; background: var(--timer); border-radius: 0 5px 5px 0; transition: width 0.2s linear; }
+.timebar i.low { animation: timer-blink 0.5s steps(2, jump-none) infinite; }
+@keyframes timer-blink { from { opacity: 1; } to { opacity: 0.45; } }
 #goalIcon { width: 44px; height: 44px; flex: none; }
 .goal-text { flex: 1; min-width: 0; }
 .label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
@@ -288,28 +290,53 @@ h1 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
 .error { color: var(--warn); font-size: 13px; min-height: 0; }
 .error:empty { display: none; }
 
-/* Home */
+/* Home screen */
+.home {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: var(--bg);
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+}
+.home-inner {
+  width: min(100%, 440px);
+  margin: auto 0;
+  padding: 28px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
 .home-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-head h1 { font-size: 30px; }
+.home-head .logo { grid-template-columns: 13px 13px; gap: 4px; }
+.home-head .logo i { width: 13px; height: 13px; }
+.home .stack { gap: 12px; }
 .streak { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 14px; white-space: nowrap; }
 .streak b { font-size: 18px; font-weight: 800; color: var(--fg); font-variant-numeric: tabular-nums; }
 .streak .flame { width: 20px; height: 20px; fill: var(--line); stroke: none; }
 .streak.lit .flame { fill: #f2811e; }
 .streak.centered { justify-content: center; }
 .tile {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   text-align: left;
-  padding: 12px 16px;
-  border-radius: 14px;
+  padding: 15px 18px;
+  border-radius: 16px;
+  border: 3px solid var(--c, var(--line));
   background: var(--surface);
   box-shadow: var(--shadow);
 }
 .tile:active { transform: scale(0.985); }
-.tile b { font-size: 16px; font-weight: 750; }
-.tile span { color: var(--muted); font-size: 13px; }
-.tile.slim { padding: 9px 16px; box-shadow: none; background: var(--line); }
-.tile.slim b { font-size: 14px; font-weight: 650; }
+.tile b { font-size: 18px; font-weight: 750; }
+.tile span { color: var(--muted); font-size: 13.5px; }
+.tile.slim { padding: 10px 18px; border-width: 2px; border-style: dashed; box-shadow: none; background: none; }
+.tile.slim b, .tile.small b { font-size: 15px; font-weight: 700; }
+.tile.small { padding: 12px 14px; text-align: center; align-items: center; }
+.link.centered { align-self: center; }
 
 /* Form fields */
 input[type="text"], input[type="number"] {

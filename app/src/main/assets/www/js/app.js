@@ -526,7 +526,7 @@
 
   function soloTimerRunning() {
     return S && !versus().active() && S.timeLeft !== null && !S.done && !U.dealing && S.target >= 0 &&
-      !roundClosed() && $('scrim').hidden && !document.hidden;
+      !roundClosed() && $('scrim').hidden && !homeShown() && !document.hidden;
   }
 
   function tick() {
@@ -864,8 +864,18 @@
     lastTick = performance.now();
   }
 
-  function openHome() {
-    if (versus().connected()) { versus().openMenu(); return; }
+  // The home screen covers the whole app; the game is only shown once a mode
+  // has been picked.
+  const homeShown = () => !$('home').hidden;
+
+  function hideHome() {
+    $('home').hidden = true;
+    lastTick = performance.now();
+  }
+
+  function showHome() {
+    if (versus().active()) { versus().openMenu(); return; }
+    save();
     const stats = loadStats();
     const streak = currentStreak(stats);
     const daily = load(KEYS.daily, null);
@@ -880,29 +890,30 @@
     } else if (today) {
       dailyNote = `In progress · target ${today.results.length + 1} of ${DAILY_RANGES.length}`;
     } else {
-      dailyNote = streak > 0 && stats.lastDaily !== dateKey(0)
-        ? `Five targets · play today to keep your streak`
-        : 'Five targets, the same for everyone today';
+      dailyNote = streak > 0 ? 'Five targets · play today to keep your streak' : 'Five targets, the same for everyone today';
     }
     const practiceNote = practiceLive
       ? `Continue · round ${practice.results.length + 1} of ${practice.results.length + practice.queue.length + (practice.target >= 0 ? 1 : 0)}`
       : 'A fresh board, as many as you like';
 
-    openDialog(
-      '<div class="home-head"><h2>Ricochet</h2>' +
-      `<div class="streak ${streak ? 'lit' : ''}" title="Daily streak">${FLAME}<b>${streak}</b> day${streak === 1 ? '' : 's'}</div></div>` +
+    $('home').innerHTML =
+      '<div class="home-inner">' +
+      '<div class="home-head"><div class="brand"><span class="logo" aria-hidden="true"><i class="r0"></i><i class="r1"></i><i class="r2"></i><i class="r3"></i></span><h1>Ricochet</h1></div>' +
+      `<div class="streak ${streak ? 'lit' : ''}">${FLAME}<b>${streak}</b> day${streak === 1 ? '' : 's'}</div></div>` +
       '<div class="stack">' +
-      `<button class="tile" data-act="daily"><b>Daily puzzle</b><span>${dailyNote}</span></button>` +
-      `<button class="tile" data-act="practice"><b>Practice</b><span>${practiceNote}</span></button>` +
-      (practiceLive ? '<button class="tile slim" data-act="new"><b>New practice board</b></button>' : '') +
-      '<button class="tile" data-act="friend"><b>Play with a friend</b><span>Live bidding over the internet</span></button>' +
+      `<button class="tile r3" data-act="daily"><b>Daily puzzle</b><span>${dailyNote}</span></button>` +
+      `<button class="tile r2" data-act="practice"><b>Practice</b><span>${practiceNote}</span></button>` +
+      (practiceLive ? '<button class="tile r2 slim" data-act="new"><b>New practice board</b></button>' : '') +
+      '<button class="tile r1" data-act="friend"><b>Play with a friend</b><span>Live bidding over the internet</span></button>' +
+      '<div class="row"><button class="tile r4 small" data-act="settings"><b>Settings</b></button>' +
+      '<button class="tile r0 small" data-act="help"><b>How to play</b></button></div>' +
       '</div>' +
-      '<div class="row"><button class="btn" data-act="settings">Settings</button><button class="btn" data-act="help">How to play</button></div>' +
       '<div class="stats">' +
       `<div><b>${stats.rounds}</b><span class="muted">targets</span></div>` +
       `<div><b>${stats.stars}</b><span class="muted">stars</span></div>` +
       `<div><b>${stats.bestStreak}</b><span class="muted">best streak</span></div></div>` +
-      (S ? '<button class="btn quiet" data-act="close">Back to game</button>' : ''), 'home');
+      '</div>';
+    $('home').hidden = false;
   }
 
   function seg(name, options, value) {
@@ -995,13 +1006,14 @@
     'pb-play'() { setPlaying(!U.playback.timer); },
     summary: openSummary,
     close: closeDialog,
-    home: openHome,
+    home() { closeDialog(); showHome(); },
     help: openHelp,
     settings: openSettings,
     friend() { versus().openEntry(); },
-    daily() { closeDialog(); save(); startDaily(); },
+    daily() { closeDialog(); hideHome(); save(); startDaily(); },
     practice() {
       closeDialog();
+      hideHome();
       save();
       const saved = load(KEYS.practice, null);
       if (saved && saved.v === 2 && !saved.done) adopt(saved);
@@ -1012,7 +1024,7 @@
         '<div class="stack"><button class="btn primary" data-act="new-confirmed">Start new board</button>' +
         '<button class="btn quiet" data-act="home">Cancel</button></div>', 'confirm');
     },
-    'new-confirmed'() { closeDialog(); save(); U.token++; newPractice(); },
+    'new-confirmed'() { closeDialog(); hideHome(); save(); U.token++; newPractice(); },
   };
 
   function onAction(e) {
@@ -1047,9 +1059,10 @@
   });
   $('scrim').addEventListener('click', (e) => {
     // Only dialogs that are safe to dismiss close on an outside tap.
-    if (e.target === $('scrim') && S && ['home', 'help', 'settings', 'summary'].indexOf(dialogKind) >= 0) closeDialog();
+    if (e.target === $('scrim') && ['help', 'settings', 'summary'].indexOf(dialogKind) >= 0) closeDialog();
   });
-  $('menuBtn').addEventListener('click', openHome);
+  $('menuBtn').addEventListener('click', showHome);
+  $('home').addEventListener('click', onAction);
   $('undoBtn').addEventListener('click', undo);
   $('resetBtn').addEventListener('click', resetRound);
   $('hintBtn').addEventListener('click', hint);
@@ -1123,7 +1136,7 @@
   canvas.addEventListener('pointercancel', () => { gesture = null; });
 
   document.addEventListener('keydown', (e) => {
-    if (!$('scrim').hidden) return;
+    if (!$('scrim').hidden || homeShown()) return;
     const dir = { ArrowUp: RR.N, ArrowRight: RR.E, ArrowDown: RR.S, ArrowLeft: RR.W }[e.key];
     if (dir !== undefined && U.selected >= 0) { e.preventDefault(); move(U.selected, dir); return; }
     if (e.key >= '1' && e.key <= '5' && canMove() && +e.key <= G().robots.length) { U.selected = +e.key - 1; render(); }
@@ -1153,7 +1166,7 @@
 
   // What versus.js needs from here.
   RR.app = {
-    settings, saveSettings, render, openDialog, closeDialog, openHome, pickTarget,
+    settings, saveSettings, render, openDialog, closeDialog, showHome, hideHome, pickTarget,
     esc, chip, plural, NAMES, DIFFICULTY,
     dialogKind: () => dialogKind,
     animate: (r, from, to) => renderer.animateMove(r, from, to),
@@ -1168,5 +1181,5 @@
   const saved = load(KEYS.practice, null);
   if (saved && saved.v === 2 && Array.isArray(saved.walls) && saved.walls.length === RR.CELLS) adopt(saved);
   else newPractice();
-  openHome();
+  showHome();
 })();

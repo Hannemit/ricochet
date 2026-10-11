@@ -255,13 +255,14 @@
     A().reset();
     A().closeDialog();
     A().render();
-    A().openHome();
+    A().showHome();
   }
 
   function ended(message) {
     teardown();
     A().reset();
     A().render();
+    A().showHome();
     A().openDialog(`<h2>Game over</h2><p>${A().esc(message)}</p>` +
       '<button class="btn primary" data-act="home">Home</button>', 'ended');
   }
@@ -357,6 +358,11 @@
         h.deadline = now() + h.span;
       }
       for (const q of h.players) if (q.id !== id) q.done = false;
+    } else if (m.a === 'unbid' && h.phase === 'think') {
+      // Taking back a bid; if it was the only one, the clock stops again.
+      h.bids = h.bids.filter((q) => q.id !== id);
+      p.done = false;
+      if (!h.bids.length) { h.deadline = null; h.span = 0; }
     } else if (m.a === 'done' && h.phase === 'think') {
       p.done = true;
       closeBiddingIfAllDone();
@@ -569,6 +575,7 @@
     }
 
     const kind = app.dialogKind();
+    if (active()) app.hideHome();
     if (s.phase === 'lobby') openLobby();
     else if (s.phase === 'final') { if (stepped || kind === 'final') openFinal(); }
     else if (kind === 'lobby' || kind === 'final' || kind === 'join') app.closeDialog();
@@ -681,7 +688,7 @@
         return `<span class="pbid ${p.on ? '' : 'off'}"><b>${label(p.id)}</b> ${b ? b.n : '–'}${p.done ? ' ✓' : ''}</span>`;
       }).join('');
       const lead = mine
-        ? `You bid <b>${mine.n}</b>. You can still lower it until the time runs out.`
+        ? `You bid <b>${mine.n}</b>. You can lower it until the time runs out, or take it back.`
         : 'Find a route in your head, then bid how many moves it takes. No moving yet.';
       let controls;
       if (me.done) {
@@ -692,7 +699,8 @@
           '<div class="stepper"><button data-vs="minus" aria-label="Fewer">−</button>' +
           `<b>${X.draft}</b><button data-vs="plus" aria-label="More">+</button></div>` +
           `<button class="btn primary" data-vs="bid" ${canBid ? '' : 'disabled'}>${mine ? 'Lower to' : 'Bid'} ${X.draft}</button>` +
-          `<button class="btn" data-vs="done">${mine ? 'Done' : 'Pass'}</button></div>`;
+          `<button class="btn" data-vs="done">${mine ? 'Done' : 'Pass'}</button></div>` +
+          (mine ? '<button class="link centered" data-vs="unbid">Undo my bid</button>' : '');
       }
       return banner + `<div class="card"><p>${lead}</p><div class="bids">${bids}</div></div>${controls}`;
     }
@@ -816,6 +824,7 @@
     else if (name === 'plus') { X.draft++; A().render(); }
     else if (name === 'bid') act({ a: 'bid', v: X.draft });
     else if (name === 'done') act({ a: 'done' });
+    else if (name === 'unbid') act({ a: 'unbid' });
     else if (name === 'next') next();
   }
 
