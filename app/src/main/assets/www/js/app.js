@@ -64,7 +64,7 @@
     timer: 60,       // seconds per target; 0 turns the timer off
     silver: true,
     bidding: false,     // practice: bid a move count first, then prove it
-    guides: true,       // ring markers showing where the selected robot would stop
+    guides: false,      // ring markers showing where the selected robot would stop
     hair: true,
     expressions: true,
     sound: true,
@@ -1099,8 +1099,7 @@
     return `Ricochet daily · ${+d[2]} ${MONTHS[d[1] - 1]} ${d[0]}\n` +
       `★ ${stars}/${S.results.length * 3}` + (streak > 1 ? ` · 🔥 ${streak} day streak` : '') + '\n\n' +
       lines.join('\n') + '\n\n' +
-      `Solved ${solved}/${S.results.length} · ${perfect} perfect\n` +
-      'https://github.com/Hannemit/ricochet/releases/latest';
+      `Solved ${solved}/${S.results.length} · ${perfect} perfect`;
   }
 
   function share() {
