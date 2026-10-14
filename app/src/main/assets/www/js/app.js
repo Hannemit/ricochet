@@ -198,6 +198,8 @@
       revealed: false, timedOut: false, hintMove: false, bestShown: false, opt: null, timeLeft: null,
       // Bidding rounds: the bid being proved, the lowest bid proved, failed bids.
       bidding: false, bid: null, bestBid: null, bidFails: 0, hintUsed: false,
+      // The first solution sets the stars; later, better ones do not change them.
+      first: null, firstBid: null, score: null, solves: 0,
     };
   }
 
@@ -397,11 +399,17 @@
     if (RR.isSolved(S.robots, S.targets[S.target])) {
       S.solved = true;
       S.bestShown = true;
+      S.solves = (S.solves || 0) + 1;
       if (S.best === null || S.moves.length < S.best) {
         S.best = S.moves.length;
         S.bestEnd = S.robots.slice();
       }
       if (S.bidding && S.bid !== null && (S.bestBid == null || S.bid < S.bestBid)) S.bestBid = S.bid;
+      if (S.score == null) {
+        S.first = S.moves.length;
+        S.firstBid = S.bidding ? S.bid : null;
+        S.score = starsFor();
+      }
       U.panel = 'solved';
       RR.sound.solved(!!S.opt && S.moves.length <= S.opt.depth);
     } else if (proving() && S.moves.length >= S.bid) {
@@ -506,6 +514,7 @@
 
   function starsFor() {
     if (S.best === null || S.revealed || S.timedOut) return 0;
+    if (S.score != null) return S.score;
     const opt = S.opt ? S.opt.depth : S.best;
     // A bidding round is scored on the bid that was proved, not the moves used.
     const scored = S.bestBid != null ? S.bestBid : S.best;
@@ -527,7 +536,7 @@
     const stars = starsFor();
     S.results.push({
       target: S.target,
-      moves: S.revealed || S.timedOut ? null : S.best,
+      moves: S.revealed || S.timedOut ? null : S.first != null ? S.first : S.best,
       optimal: S.opt ? S.opt.depth : null,
       stars,
     });
@@ -787,7 +796,8 @@
       if (!S.opt) note = 'Nicely done.';
       else if (n <= S.opt.depth) note = 'That is the best possible.';
       else note = `The best possible is ${plural(S.opt.depth, 'move')}.`;
-      if (S.bidding && S.bestBid != null && !S.timedOut && !S.revealed) {
+      const later = S.solves > 1;
+      if (S.bidding && S.bestBid != null && !S.timedOut && !S.revealed && !later) {
         if (S.opt && S.bestBid > S.opt.depth) note = `You bid ${S.bestBid}. The best possible is ${plural(S.opt.depth, 'move')}.`;
         else if (S.opt) note = `You bid ${S.bestBid}, and that is the best possible.`;
         if (S.bidFails) note += ` ${plural(S.bidFails, 'failed bid')} cost you.`;
@@ -795,8 +805,10 @@
       }
       if (S.timedOut) note += ' No stars after the timer ran out.';
       else if (S.revealed) note += ' No stars after seeing the solution.';
+      else if (later && S.firstBid != null) note += ` Your stars are for your first bid, ${S.firstBid}.`;
+      else if (later) note += ` Your stars are for your first solution, in ${plural(S.first, 'move')}.`;
       else if (S.hintMove && stars === 2 && n <= (S.opt ? S.opt.depth : n)) note += ' One star off for the move hint.';
-      const canImprove = S.opt && (S.bestBid != null ? S.bestBid : n) > S.opt.depth;
+      const canImprove = S.opt && (S.bestBid != null && !later ? S.bestBid : n) > S.opt.depth;
       return `<div class="card result"><div class="stars">${starsHtml(stars)}</div>` +
         `<div class="result-text"><b>Solved in ${plural(n, 'move')}</b><span>${note}</span></div></div>` +
         '<div class="row">' +
@@ -1048,7 +1060,7 @@
       '<li>Each round names a robot and a target. Get that robot to stop exactly on the target.</li>' +
       '<li>Robots slide in a straight line and only stop when they hit a wall or another robot. Use the other robots as blockers. The silver robot is only ever a blocker.</li>' +
       '<li>Tap a robot to select it, then swipe in a direction. You can also tap anywhere in the robot’s row or column.</li>' +
-      '<li>Fewer moves is better. Three stars for matching the best possible solution, two for coming within two moves, one for solving it at all.</li>' +
+      '<li>Fewer moves is better. Three stars for matching the best possible solution, two for coming within two moves, one for solving it at all. Only your first solution counts, though you can keep looking for a better one.</li>' +
       '</ol>' +
       '<p class="muted">Hint reveals a little more each time you tap it: the best move count, the robots involved, then the next move. Solution shows every best solution and plays it on the board.</p>' +
       '<p class="muted">With a friend, nobody moves anything at first. Find a route in your head and bid its length. The lowest bid gets to prove it on the board and wins the target.</p>' +
