@@ -68,10 +68,12 @@
     hair: true,
     expressions: true,
     sound: true,
+    theme: 'auto',      // auto follows the phone; or light / dark
     name: '',
     pid: Math.random().toString(36).slice(2, 10),
   }, load(KEYS.settings, {}));
   if (!DIFFICULTY[settings.difficulty]) settings.difficulty = 'medium';
+  if (['auto', 'light', 'dark'].indexOf(settings.theme) < 0) settings.theme = 'auto';
   function saveSettings() {
     store(KEYS.settings, settings);
     RR.sound.enabled = settings.sound;
@@ -198,6 +200,7 @@
       revealed: false, timedOut: false, hintMove: false, bestShown: false, opt: null, timeLeft: null,
       // Bidding rounds: the bid being proved, the lowest bid proved, failed bids.
       bidding: false, bid: null, bestBid: null, bidFails: 0, hintUsed: false,
+      hints: 0, // hint steps taken before the first solution
       // The first solution sets the stars; later, better ones do not change them.
       first: null, firstBid: null, score: null, solves: 0,
     };
@@ -339,7 +342,7 @@
     S.target = pick.ti;
     S.start = S.robots.slice();
     S.opt = pick.opt;
-    S.timeLeft = settings.timer > 0 ? settings.timer * 1000 : null;
+    S.timeLeft = roundTime() > 0 ? roundTime() * 1000 : null;
     S.bidding = S.mode === 'practice' && settings.bidding;
     U.draft = 5;
     U.dealing = false;
@@ -476,7 +479,9 @@
       }
     }
     if (U.hint.depth > 0) {
+      const level = U.hintLevel;
       U.hintLevel = Math.min(3, U.hintLevel + 1);
+      if (U.hintLevel > level && S.score == null) S.hints = (S.hints || 0) + 1;
       S.hintUsed = true;
       S.bid = null;
       if (U.hint.fromStart) S.bestShown = true;
@@ -512,6 +517,9 @@
     startPlayback(0);
   }
 
+  // Saves from older versions only recorded whether a hint was used.
+  const hintCount = () => S.hints || (S.hintMove || (S.bidding && S.hintUsed) ? 1 : 0);
+
   function starsFor() {
     if (S.best === null || S.revealed || S.timedOut) return 0;
     if (S.score != null) return S.score;
@@ -519,7 +527,10 @@
     // A bidding round is scored on the bid that was proved, not the moves used.
     const scored = S.bestBid != null ? S.bestBid : S.best;
     let stars = scored <= opt ? 3 : scored <= opt + 2 ? 2 : 1;
-    if (S.hintMove || (S.bidding && S.hintUsed)) stars = Math.min(stars, 2);
+    // Any hint costs a star; more than three leave one star at most.
+    const hints = hintCount();
+    if (hints > 3) stars = 1;
+    else if (hints > 0) stars = Math.min(stars, 2);
     if (S.bidFails) stars = Math.min(stars, Math.max(1, 3 - S.bidFails));
     return stars;
   }
@@ -613,11 +624,15 @@
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
 
+  // The daily puzzle has a fixed timer, so everyone's results compare fairly.
+  const DAILY_TIME = 90;
+  const roundTime = () => S.mode === 'daily' ? DAILY_TIME : settings.timer;
+
   function updateTimer() {
     let t = null; // { left, total } in ms
     if (versus().active()) t = versus().timer();
     else if (S && S.timeLeft !== null && !S.done && S.target >= 0 && !U.dealing) {
-      t = { left: S.timeLeft, total: settings.timer * 1000, frozen: roundClosed() };
+      t = { left: S.timeLeft, total: roundTime() * 1000, frozen: roundClosed() };
     }
     const el = $('timeText');
     const bar = $('timeBar');
@@ -801,13 +816,12 @@
         if (S.opt && S.bestBid > S.opt.depth) note = `You bid ${S.bestBid}. The best possible is ${plural(S.opt.depth, 'move')}.`;
         else if (S.opt) note = `You bid ${S.bestBid}, and that is the best possible.`;
         if (S.bidFails) note += ` ${plural(S.bidFails, 'failed bid')} cost you.`;
-        else if (S.hintUsed && stars === 2 && S.opt && S.bestBid <= S.opt.depth) note += ' One star off for the hint.';
       }
       if (S.timedOut) note += ' No stars after the timer ran out.';
       else if (S.revealed) note += ' No stars after seeing the solution.';
       else if (later && S.firstBid != null) note += ` Your stars are for your first bid, ${S.firstBid}.`;
       else if (later) note += ` Your stars are for your first solution, in ${plural(S.first, 'move')}.`;
-      else if (S.hintMove && stars === 2 && n <= (S.opt ? S.opt.depth : n)) note += ' One star off for the move hint.';
+      else if (hintCount()) note += hintCount() > 3 ? ` ${plural(hintCount(), 'hint')} used, so one star at most.` : ` One star off for ${hintCount() > 1 ? 'the hints' : 'the hint'}.`;
       const canImprove = S.opt && (S.bestBid != null && !later ? S.bestBid : n) > S.opt.depth;
       return `<div class="card result"><div class="stars">${starsHtml(stars)}</div>` +
         `<div class="result-text"><b>Solved in ${plural(n, 'move')}</b><span>${note}</span></div></div>` +
@@ -1023,7 +1037,7 @@
       '<div class="field"><div class="label">Timer per target</div>' +
       seg('timer', [['0', 'Off'], ['30', '0:30'], ['60', '1:00'], ['120', '2:00'], ['custom', 'Custom']], timerValue) +
       (custom ? `<label class="inline-field">Seconds <input id="timerCustom" type="number" inputmode="numeric" min="5" max="900" value="${settings.timer}"></label>` : '') +
-      '<p class="muted">When it runs out the target scores no stars. In a game with a friend it is the time left to bid once someone has bid first.</p></div>' +
+      '<p class="muted">When it runs out the target scores no stars. The daily puzzle always gives 1:30 per target. In a game with a friend it is the time left to bid once someone has bid first.</p></div>' +
       '<div class="field"><div class="label">Silver robot</div>' +
       seg('silver', [['true', 'On'], ['false', 'Off']], String(settings.silver)) +
       '<p class="muted">A fifth robot with no target of its own. Applies to new practice boards.</p></div>' +
@@ -1038,6 +1052,9 @@
       '<div class="field"><div class="label">Robot expressions</div>' +
       seg('expressions', [['true', 'On'], ['false', 'Off']], String(settings.expressions)) +
       '<p class="muted">Off gives every robot the same small smile.</p></div>' +
+      '<div class="field"><div class="label">Theme</div>' +
+      seg('theme', [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], settings.theme) +
+      '<p class="muted">Auto follows your phone’s dark mode.</p></div>' +
       '<div class="field"><div class="label">Sound</div>' +
       seg('sound', [['true', 'On'], ['false', 'Off']], String(settings.sound)) + '</div>' +
       '<button class="btn primary" data-act="home">Done</button>', 'settings');
@@ -1048,6 +1065,7 @@
     else if (name === 'timer') settings.timer = value === 'custom' ? 90 : +value;
     else if (name === 'silver' || name === 'bidding' || name === 'guides' || name === 'hair' || name === 'expressions') settings[name] = value === 'true';
     else if (name === 'sound') settings.sound = value === 'true';
+    else if (name === 'theme') { settings.theme = value; applyTheme(); }
     saveSettings();
     if (name === 'sound' && settings.sound) RR.sound.bid();
     openSettings();
@@ -1060,7 +1078,7 @@
       '<li>Each round names a robot and a target. Get that robot to stop exactly on the target.</li>' +
       '<li>Robots slide in a straight line and only stop when they hit a wall or another robot. Use the other robots as blockers. The silver robot is only ever a blocker.</li>' +
       '<li>Tap a robot to select it, then swipe in a direction. You can also tap anywhere in the robot’s row or column.</li>' +
-      '<li>Fewer moves is better. Three stars for matching the best possible solution, two for coming within two moves, one for solving it at all. Only your first solution counts, though you can keep looking for a better one.</li>' +
+      '<li>Fewer moves is better. Three stars for matching the best possible solution, two for coming within two moves, one for solving it at all. Any hint costs a star, and more than three hints leave one star. Only your first solution counts, though you can keep looking for a better one.</li>' +
       '</ol>' +
       '<p class="muted">Hint reveals a little more each time you tap it: the best move count, the robots involved, then the next move. Solution shows every best solution and plays it on the board.</p>' +
       '<p class="muted">With a friend, nobody moves anything at first. Find a route in your head and bid its length. The lowest bid gets to prove it on the board and wins the target.</p>' +
@@ -1284,6 +1302,18 @@
 
   /* ---------- start-up ---------- */
 
+  function applyTheme() {
+    const root = document.documentElement;
+    if (settings.theme === 'light' || settings.theme === 'dark') root.dataset.theme = settings.theme;
+    else delete root.dataset.theme;
+    const dark = settings.theme === 'dark' ||
+      (settings.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+    // Lets the app match the phone's status and navigation bars.
+    if (window.Android && window.Android.setDark) window.Android.setDark(dark);
+    renderer.refreshTheme();
+    drawGoalIcon();
+  }
+
   function fitBoard() {
     const size = Math.floor($('boardWrap').clientWidth);
     if (size > 0 && size !== renderer.size) renderer.resize(size);
@@ -1291,10 +1321,8 @@
 
   new ResizeObserver(fitBoard).observe($('boardWrap'));
   window.addEventListener('resize', fitBoard);
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    renderer.refreshTheme();
-    drawGoalIcon();
-  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+  applyTheme();
   document.addEventListener('visibilitychange', () => {
     lastTick = performance.now();
     if (document.hidden) save();

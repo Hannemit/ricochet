@@ -7,7 +7,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
@@ -27,6 +29,7 @@ public class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private static final String START = "https://" + HOST + "/index.html";
 
+    private FrameLayout frame;
     private WebView webView;
 
     @Override
@@ -37,7 +40,7 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         int background = getColor(R.color.app_background);
-        FrameLayout frame = new FrameLayout(this);
+        frame = new FrameLayout(this);
         frame.setBackgroundColor(background);
         frame.setOnApplyWindowInsetsListener((v, insets) -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -90,6 +93,33 @@ public class MainActivity extends Activity {
             send.setType("text/plain");
             send.putExtra(Intent.EXTRA_TEXT, text);
             runOnUiThread(() -> startActivity(Intent.createChooser(send, null)));
+        }
+
+        /** Matches the system bars to the page when its theme differs from the phone's. */
+        @JavascriptInterface
+        public void setDark(boolean dark) {
+            runOnUiThread(() -> applyBars(dark));
+        }
+    }
+
+    // The colours match --bg in www/style.css.
+    @SuppressWarnings("deprecation")
+    private void applyBars(boolean dark) {
+        int color = dark ? 0xFF0F1119 : 0xFFECEEF4;
+        Window window = getWindow();
+        window.setStatusBarColor(color);
+        window.setNavigationBarColor(color);
+        frame.setBackgroundColor(color);
+        webView.setBackgroundColor(color);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            int light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            window.getInsetsController().setSystemBarsAppearance(dark ? 0 : light, light);
+        } else {
+            View decor = window.getDecorView();
+            int light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            int flags = decor.getSystemUiVisibility();
+            decor.setSystemUiVisibility(dark ? flags & ~light : flags | light);
         }
     }
 

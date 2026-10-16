@@ -23,8 +23,10 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   color-scheme: light;
 }
+/* Dark colours: used when the phone is in dark mode, unless the Theme
+   setting picks light, and always when it picks dark. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1119;
     --surface: #1a1d2a;
     --fg: #eceef6;
@@ -46,6 +48,28 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1119;
+  --surface: #1a1d2a;
+  --fg: #eceef6;
+  --muted: #949bb0;
+  --line: #2b3042;
+  --board: #07080d;
+  --tile: #242a3b;
+  --tile-alt: #20263a;
+  --wall: #e8ebf5;
+  --center: #3a4160;
+  --r0: #f0575c;
+  --r1: #3cb97d;
+  --r2: #5b9bff;
+  --r3: #f7c137;
+  --r4: #b9c0d0;
+  --warn: #ff7a70;
+  --timer: #ff3b3b;
+  --on-primary: #0f1119;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }

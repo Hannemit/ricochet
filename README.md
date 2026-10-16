@@ -10,7 +10,8 @@ A Ricochet Robots puzzle game for Android. Solo play works fully offline.
 - A daily puzzle (five targets, the same for everyone that day) with a streak counter
   and a shareable result
 - Unlimited practice boards at easy, medium or hard difficulty, optionally with bidding
-- A per-target timer (one minute by default, adjustable or off)
+- A per-target timer (one minute by default, adjustable or off; 1:30 in the daily puzzle)
+- Light and dark themes, following the phone by default
 - Play with a friend over the internet: share a five-letter code, bid, and prove your bid
 
 Multiplayer needs no account or server of our own. Phones find each other through HiveMQ's
